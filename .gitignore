@@ -1,0 +1,90 @@
+# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
+
+# dependencies
+node_modules/
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+pnpm-debug.*
+
+# Expo / Metro
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+.metro-health-check*
+
+# Native generated (Expo prebuild) — keep local android/ios out of git
+/ios
+/android
+.kotlin/
+*.orig.*
+
+# Android / iOS build outputs (if native folders are ever tracked)
+android/build/
+android/app/build/
+android/.gradle/
+android/app/.cxx/
+ios/build/
+ios/Pods/
+ios/DerivedData/
+*.apk
+*.aab
+*.ipa
+
+# Signing / keystores / certificates — NEVER commit
+*.jks
+*.keystore
+*.p12
+*.p8
+*.key
+*.mobileprovision
+*.pem
+keystore-*
+**/lifequest-keystore*
+**/keystore-unlock*
+artifacts/lifequest-keystore.zip
+artifacts/**/*keystore*
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+*.env
+secrets/
+**/secrets/**
+local.properties
+**/local.properties
+gradle.properties.local
+*.secret
+
+# Local SQLite / user data / backups
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.lqbackup
+**/user-backups/
+**/backups/
+*.backup
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
+*.swo
+
+# TypeScript
+*.tsbuildinfo
+
+# Test / coverage
+coverage/
+.jest/
+
+# Misc local
+*.log
+*.tmp
+.cache/
