@@ -1,24 +1,27 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, View, Text, StyleSheet } from 'react-native';
+import { ScrollView, View, Text, StyleSheet } from 'react-native';
 import { Body, Button, Chip, Field, Screen, Title } from '@/src/design-system/ui';
 import { colors, spacing, typography } from '@/src/design-system/theme';
 import { FantasyPanel } from '@/src/design-system/FantasyPanel';
 import { EmptyState, QuestCard } from '@/src/design-system/QuestCard';
-import { CATEGORY_LABELS } from '@/src/design-system/categoryLabels';
 import { completionRatio } from '@/src/domain/rules/xp';
 import { useAppStore } from '@/src/state/appStore';
 import { getDb } from '@/src/data/db/client';
 import { confirmGoalDay, logGoalNumeric } from '@/src/domain/services/trackingService';
 import {
   getCurrentVersion,
-  insertGoal,
-  listGoals,
+  listTrackingInRange,
   setGoalStatus,
 } from '@/src/data/db/repositories/goalRepo';
-import { GOAL_KIND_LABELS, GOAL_TEMPLATES } from '@/src/data/content/goalTemplates';
-import { createId } from '@/src/utils/id';
-import { nowIso } from '@/src/domain/rules/dates';
-import type { GoalDefinition, GoalKind, GoalTier, TrackingStatus } from '@/src/domain/models/types';
+import { GOAL_TEMPLATES } from '@/src/data/content/goalTemplates';
+import { HabitSetupFlow } from '@/src/design-system/HabitSetupFlow';
+import { scheduleVersionUpdate } from '@/src/domain/services/goalLifecycleService';
+import {
+  countWeeklySuccessDays,
+  formatWeeklyProgress,
+  weekBoundsMondaySunday,
+} from '@/src/domain/rules/weeklyTracking';
+import type { GoalDefinition, GoalKind, TrackingStatus } from '@/src/domain/models/types';
 import {
   kindRequiresNumericTarget,
   parseLogValue,
@@ -35,8 +38,6 @@ const STATUS_FR: Record<TrackingStatus, string> = {
   paused: 'En pause',
 };
 
-const KINDS: GoalKind[] = ['habit', 'abstinence', 'limit', 'reduce', 'duration', 'quantity'];
-
 export default function GoalsScreen() {
   const goals = useAppStore((s) => s.goals);
   const today = useAppStore((s) => s.today);
@@ -44,15 +45,19 @@ export default function GoalsScreen() {
   const refresh = useAppStore((s) => s.refresh);
   const [flash, setFlash] = useState<string | null>(null);
   const [draftValues, setDraftValues] = useState<Record<string, string>>({});
-  const [versions, setVersions] = useState<Record<string, { unit: string | null; target: number | null }>>({});
-  const [showCustom, setShowCustom] = useState(false);
-  const [customTitle, setCustomTitle] = useState('');
-  const [customKind, setCustomKind] = useState<GoalKind>('habit');
-  const [customUnit, setCustomUnit] = useState('');
-  const [customTarget, setCustomTarget] = useState('');
-  const [customTier, setCustomTier] = useState<GoalTier>('normal');
-  const [pendingTemplateId, setPendingTemplateId] = useState<string | null>(null);
-  const [templateTargetDraft, setTemplateTargetDraft] = useState('');
+  const [versions, setVersions] = useState<
+    Record<
+      string,
+      {
+        unit: string | null;
+        target: number | null;
+        scheduleKind: 'daily' | 'weekly';
+        weeklyTarget: number | null;
+      }
+    >
+  >({});
+  const [weeklyDone, setWeeklyDone] = useState<Record<string, number>>({});
+  const [editTargetDraft, setEditTargetDraft] = useState<Record<string, string>>({});
   const [actionBusy, setActionBusy] = useState(false);
   const actionLockRef = useRef(false);
 
@@ -80,14 +85,26 @@ export default function GoalsScreen() {
     void (async () => {
       try {
         const db = await getDb();
-        const next: Record<string, { unit: string | null; target: number | null }> = {};
+        const next: Record<string, { unit: string | null; target: number | null; scheduleKind: 'daily' | 'weekly'; weeklyTarget: number | null }> = {};
+        const weekly: Record<string, number> = {};
+        const { start, end } = weekBoundsMondaySunday(today);
         for (const g of goalsSnapshot) {
           if (cancelled) return;
           const v = await getCurrentVersion(db, g.id);
-          next[g.id] = { unit: g.unit, target: v?.targetValue ?? null };
+          next[g.id] = {
+            unit: g.unit,
+            target: v?.targetValue ?? null,
+            scheduleKind: v?.scheduleKind ?? 'daily',
+            weeklyTarget: v?.weeklyTargetCount ?? null,
+          };
+          if (v?.scheduleKind === 'weekly') {
+            const rows = await listTrackingInRange(db, g.id, start, end);
+            weekly[g.id] = countWeeklySuccessDays(rows, start, end);
+          }
         }
         if (cancelled) return;
         setVersions(goalsSnapshot.length === 0 ? {} : next);
+        setWeeklyDone(weekly);
       } catch {
         if (!cancelled) showFeedback('Chargement des cibles impossible.');
       }
@@ -95,7 +112,7 @@ export default function GoalsScreen() {
     return () => {
       cancelled = true;
     };
-  }, [activeGoalIdsKey]);
+  }, [activeGoalIdsKey, today]);
 
   const runAction = async (fn: () => Promise<void>) => {
     if (actionLockRef.current) return;
@@ -174,6 +191,8 @@ export default function GoalsScreen() {
         showFeedback(
           `Valeur ${parsed.value} (${STATUS_FR[r.status]}) — XP ajustée : -${Math.abs(r.xpGranted)}.`,
         );
+      } else if (goal.followWithoutXp) {
+        showFeedback(`Valeur ${parsed.value} enregistrée (suivi neutre).`);
       } else if (r.xpGranted > 0) {
         showFeedback(`Valeur ${parsed.value} (${STATUS_FR[r.status]}) · +${r.xpGranted} XP`);
       } else {
@@ -183,129 +202,45 @@ export default function GoalsScreen() {
     });
   };
 
-  const beginTemplate = async (templateId: string) => {
-    const t = GOAL_TEMPLATES.find((x) => x.id === templateId);
-    if (!t) return;
-    try {
-      const db = await getDb();
-      const existing = (await listGoals(db, true)).some(
-        (g) => g.templateId === templateId && g.status !== 'archived',
-      );
-      if (existing) {
-        showFeedback('Ce modèle est déjà actif.');
-        return;
-      }
-      setPendingTemplateId(templateId);
-      setTemplateTargetDraft(t.targetValue != null ? String(t.targetValue) : '');
-    } catch {
-      showFeedback('Impossible de vérifier ce modèle pour le moment.');
-    }
-  };
-
-  const confirmTemplate = async () => {
-    if (!pendingTemplateId) return;
-    const t = GOAL_TEMPLATES.find((x) => x.id === pendingTemplateId);
-    if (!t) return;
+  const applyTargetEdit = async (goalId: string, kind: GoalKind) => {
     await runAction(async () => {
-      const targetCheck = validateCreationTarget(
-        t.kind,
-        kindRequiresNumericTarget(t.kind) ? templateTargetDraft : '',
-      );
-      if (!targetCheck.ok) {
-        showFeedback(targetCheck.error);
-        return;
-      }
+      const raw = editTargetDraft[goalId] ?? '';
       const db = await getDb();
-      const goalId = createId('goal');
-      const createdAt = nowIso();
-      await insertGoal(
-        db,
-        {
-          id: goalId,
-          title: t.title,
-          kind: t.kind,
-          unit: t.unit,
-          weight: 1,
-          status: 'active',
-          templateId: t.id,
-          sensitive: !!t.sensitive,
-          followWithoutXp: false,
-          createdAt,
-        },
-        {
-          id: createId('gver'),
-          goalId,
-          version: 1,
-          tier: t.defaultTier,
-          targetValue: targetCheck.value,
-          scheduleKind: t.scheduleKind,
-          weeklyTargetCount: t.weeklyTargetCount,
-          notes: null,
-          effectiveFrom: createdAt.slice(0, 10),
-          effectiveTo: null,
-        },
-      );
-      setPendingTemplateId(null);
-      setTemplateTargetDraft('');
-      await refresh();
-      showFeedback(`Objectif « ${t.title} » ajouté.`);
-    });
-  };
-
-  const createCustom = async () => {
-    await runAction(async () => {
-      const title = customTitle.trim();
-      if (!title) {
-        showFeedback('Donne un nom à l\'objectif.');
-        return;
+      const ver = versions[goalId];
+      if (ver?.scheduleKind === 'weekly') {
+        const w = Number(raw);
+        if (!Number.isInteger(w) || w < 1 || w > 7) {
+          showFeedback('Nombre de jours par semaine : entre 1 et 7.');
+          return;
+        }
+        const { effectiveFrom } = await scheduleVersionUpdate(db, goalId, today, {
+          weeklyTargetCount: w,
+        });
+        showFeedback(`Cible hebdo mise à jour — effet à partir du ${effectiveFrom}.`);
+      } else {
+        const check = validateCreationTarget(kind, raw);
+        if (!check.ok) {
+          showFeedback(check.error);
+          return;
+        }
+        if (check.value == null) {
+          showFeedback('Une cible numérique est requise.');
+          return;
+        }
+        const { effectiveFrom } = await scheduleVersionUpdate(db, goalId, today, {
+          targetValue: check.value,
+        });
+        showFeedback(`Cible mise à jour — effet à partir du ${effectiveFrom} (historique inchangé).`);
       }
-      const targetCheck = validateCreationTarget(customKind, customTarget);
-      if (!targetCheck.ok) {
-        showFeedback(targetCheck.error);
-        return;
-      }
-      const db = await getDb();
-      const goalId = createId('goal');
-      const createdAt = nowIso();
-      const unit = customUnit.trim() || null;
-      await insertGoal(
-        db,
-        {
-          id: goalId,
-          title,
-          kind: customKind,
-          unit,
-          weight: 1,
-          status: 'active',
-          templateId: null,
-          sensitive: false,
-          followWithoutXp: false,
-          createdAt,
-        },
-        {
-          id: createId('gver'),
-          goalId,
-          version: 1,
-          tier: customTier,
-          targetValue: targetCheck.value,
-          scheduleKind: 'daily',
-          weeklyTargetCount: null,
-          notes: null,
-          effectiveFrom: createdAt.slice(0, 10),
-          effectiveTo: null,
-        },
-      );
-      setCustomTitle('');
-      setCustomUnit('');
-      setCustomTarget('');
-      setShowCustom(false);
       await refresh();
-      showFeedback(`Objectif personnalisé « ${title} » créé.`);
     });
   };
 
   const binaryAbstinence = (g: GoalDefinition) => g.kind === 'abstinence';
-  const binaryHabit = (g: GoalDefinition) => g.kind === 'habit';
+  const binaryHabit = (g: GoalDefinition) =>
+    g.kind === 'habit' && versions[g.id]?.scheduleKind !== 'weekly';
+  const binaryWeeklyHabit = (g: GoalDefinition) =>
+    g.kind === 'habit' && versions[g.id]?.scheduleKind === 'weekly';
 
   return (
     <Screen>
@@ -338,9 +273,17 @@ export default function GoalsScreen() {
           const initialDraft =
             draftValues[g.id] ?? (tr?.value != null ? String(tr.value) : '');
           const targetLabel =
-            ver?.target != null ? `Cible : ${ver.target}${g.unit ? ` ${g.unit}` : ''}` : GOAL_KIND_LABELS[g.kind];
+            ver?.scheduleKind === 'weekly' && ver.weeklyTarget != null
+              ? formatWeeklyProgress(weeklyDone[g.id] ?? 0, ver.weeklyTarget)
+              : ver?.target != null
+                ? `Cible : ${ver.target}${g.unit ? ` ${g.unit}` : ''}`
+                : g.kind === 'abstinence'
+                  ? 'Abstinence déclarée'
+                  : g.followWithoutXp
+                    ? 'Suivi neutre'
+                    : 'Confirmation quotidienne';
           const progress =
-            ver?.target != null && tr?.value != null
+            !g.followWithoutXp && ver?.target != null && tr?.value != null
               ? completionRatio(status, g.kind, tr.value, ver.target)
               : undefined;
 
@@ -394,21 +337,38 @@ export default function GoalsScreen() {
                 </>
               ) : null}
 
-              {g.status !== 'paused' && (binaryHabit(g) || binaryAbstinence(g)) ? (
+              {ver?.scheduleKind === 'weekly' ? (
+                <Body muted>Suivi hebdomadaire — pas encore de récompense RPG sur cette habitude.</Body>
+              ) : null}
+
+              {g.status !== 'paused' && (binaryHabit(g) || binaryAbstinence(g) || binaryWeeklyHabit(g)) ? (
                 <>
-                  <Body muted>Confirmation explicite requise :</Body>
+                  <Body muted>Confirmation du jour (réversible) :</Body>
                   <View style={styles.row}>
                     {binaryAbstinence(g) ? (
                       <>
                         <Chip
-                          label="Jour sans consommation"
+                          label="Journée sans consommation"
                           selected={status === 'success'}
                           onPress={() => confirm(g.id, 'success', 0)}
                         />
                         <Chip
-                          label="J'ai consommé"
+                          label="Consommation déclarée"
                           selected={status === 'miss'}
                           onPress={() => confirm(g.id, 'miss', 1)}
+                        />
+                      </>
+                    ) : binaryWeeklyHabit(g) ? (
+                      <>
+                        <Chip
+                          label="Appel fait"
+                          selected={status === 'success'}
+                          onPress={() => confirm(g.id, 'success')}
+                        />
+                        <Chip
+                          label="Pas d'appel"
+                          selected={status === 'miss'}
+                          onPress={() => confirm(g.id, 'miss')}
                         />
                       </>
                     ) : (
@@ -428,6 +388,24 @@ export default function GoalsScreen() {
                     />
                   </View>
                 </>
+              ) : null}
+
+              {(kindRequiresNumericTarget(g.kind) || ver?.scheduleKind === 'weekly') && g.status !== 'paused' ? (
+                <View style={styles.note}>
+                  <Body>Modifier mon objectif (effet dès demain)</Body>
+                  <Field
+                    value={editTargetDraft[g.id] ?? (ver?.weeklyTarget != null ? String(ver.weeklyTarget) : ver?.target != null ? String(ver.target) : '')}
+                    onChangeText={(t) => setEditTargetDraft((d) => ({ ...d, [g.id]: t }))}
+                    keyboardType="decimal-pad"
+                    placeholder={ver?.scheduleKind === 'weekly' ? 'Jours / semaine' : 'Nouvelle cible'}
+                  />
+                  <Button
+                    label="Enregistrer la cible"
+                    variant="secondary"
+                    disabled={actionBusy}
+                    onPress={() => void applyTargetEdit(g.id, g.kind)}
+                  />
+                </View>
               ) : null}
 
               <View style={styles.manageRow}>
@@ -459,67 +437,13 @@ export default function GoalsScreen() {
 
         <FantasyPanel accent>
           <Text style={styles.sectionHeading}>Ajouter une habitude</Text>
-          <Body muted>Six familles optionnelles — choisis ce qui te correspond aujourd'hui.</Body>
-          <View style={styles.templateGrid}>
-            {GOAL_TEMPLATES.filter((t) => t.id !== 'breathing5').map((t) => (
-              <Pressable
-                key={t.id}
-                onPress={() => void beginTemplate(t.id)}
-                accessibilityRole="button"
-                style={({ pressed }) => [
-                  styles.templateCard,
-                  pendingTemplateId === t.id && styles.templateCardSelected,
-                  pressed && { opacity: 0.85 },
-                ]}
-              >
-                <Text style={styles.templateCat}>{CATEGORY_LABELS[t.category]}</Text>
-                <Text style={styles.templateTitle}>{t.title}</Text>
-              </Pressable>
-            ))}
-          </View>
+          <Body muted>Catégorie → intention → cible → valider.</Body>
+          <HabitSetupFlow
+            disabled={actionBusy}
+            onFeedback={showFeedback}
+            onDone={refresh}
+          />
         </FantasyPanel>
-
-        {pendingTemplateId ? (
-          <View style={styles.note}>
-            {(() => {
-              const t = GOAL_TEMPLATES.find((x) => x.id === pendingTemplateId);
-              if (!t) return null;
-              return (
-                <>
-                  <Body>Confirmer « {t.title} »</Body>
-                  {kindRequiresNumericTarget(t.kind) ? (
-                    <Field
-                      value={templateTargetDraft}
-                      onChangeText={setTemplateTargetDraft}
-                      placeholder={t.unit ? `Cible (${t.unit})` : 'Cible numérique'}
-                      keyboardType="decimal-pad"
-                      accessibilityLabel={`Cible pour ${t.title}`}
-                    />
-                  ) : (
-                    <Body muted>Pas de cible numérique (confirmation quotidienne).</Body>
-                  )}
-                  <View style={styles.row}>
-                    <Button
-                      label="Créer l'objectif"
-                      onPress={() => void confirmTemplate()}
-                      variant="primary"
-                      disabled={actionBusy}
-                    />
-                    <Button
-                      label="Annuler"
-                      onPress={() => {
-                        setPendingTemplateId(null);
-                        setTemplateTargetDraft('');
-                      }}
-                      variant="ghost"
-                      disabled={actionBusy}
-                    />
-                  </View>
-                </>
-              );
-            })()}
-          </View>
-        ) : null}
 
         {templateNotes.some((t) => t.alcoholSafety || t.nicotineNote) ? (
           <View style={styles.note}>
@@ -527,53 +451,6 @@ export default function GoalsScreen() {
           </View>
         ) : null}
 
-        <FantasyPanel>
-          <Text style={styles.sectionHeading}>Créer un objectif personnalisé</Text>
-        {showCustom ? (
-          <View>
-            <Field value={customTitle} onChangeText={setCustomTitle} placeholder="Nom" />
-            <Body muted>Type</Body>
-            <View style={styles.row}>
-              {KINDS.map((k) => (
-                <Chip
-                  key={k}
-                  label={GOAL_KIND_LABELS[k]}
-                  selected={customKind === k}
-                  onPress={() => {
-                    setCustomKind(k);
-                    if (!kindRequiresNumericTarget(k)) setCustomTarget('');
-                  }}
-                />
-              ))}
-            </View>
-            <Field value={customUnit} onChangeText={setCustomUnit} placeholder="Unité (facultatif)" />
-            {kindRequiresNumericTarget(customKind) ? (
-              <Field
-                value={customTarget}
-                onChangeText={setCustomTarget}
-                placeholder="Cible numérique (obligatoire)"
-                keyboardType="decimal-pad"
-              />
-            ) : (
-              <Body muted>Pas de cible numérique pour ce type.</Body>
-            )}
-            <View style={styles.row}>
-              {(['minimal', 'normal', 'ambitieux'] as GoalTier[]).map((tier) => (
-                <Chip
-                  key={tier}
-                  label={tier}
-                  selected={customTier === tier}
-                  onPress={() => setCustomTier(tier)}
-                />
-              ))}
-            </View>
-            <Button label="Créer l'objectif" onPress={() => void createCustom()} disabled={actionBusy} />
-            <Button label="Annuler" onPress={() => setShowCustom(false)} variant="ghost" />
-          </View>
-        ) : (
-          <Button label="Nouvel objectif personnalisé" onPress={() => setShowCustom(true)} variant="secondary" />
-        )}
-        </FantasyPanel>
       </ScrollView>
     </Screen>
   );
@@ -598,15 +475,4 @@ const styles = StyleSheet.create({
     borderColor: colors.line,
     backgroundColor: colors.bg,
   },
-  templateGrid: { marginTop: spacing.sm, gap: spacing.sm },
-  templateCard: {
-    padding: spacing.md,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.line,
-    backgroundColor: colors.card,
-  },
-  templateCardSelected: { borderColor: colors.gold, backgroundColor: colors.mist },
-  templateCat: { ...typography.label, color: colors.gold, fontSize: 11 },
-  templateTitle: { ...typography.body, color: colors.ink, marginTop: 4 },
 });

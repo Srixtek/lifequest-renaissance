@@ -72,12 +72,7 @@ export async function setGoalStatus(
   await db.runAsync('UPDATE goal_definitions SET status = ? WHERE id = ?', status, goalId);
 }
 
-export async function getCurrentVersion(db: Conn, goalId: string): Promise<GoalVersion | null> {
-  const r = await db.getFirstAsync<any>(
-    `SELECT * FROM goal_versions WHERE goal_id = ? AND effective_to IS NULL ORDER BY version DESC LIMIT 1`,
-    goalId,
-  );
-  if (!r) return null;
+function mapVersion(r: any): GoalVersion {
   return {
     id: r.id,
     goalId: r.goal_id,
@@ -90,6 +85,69 @@ export async function getCurrentVersion(db: Conn, goalId: string): Promise<GoalV
     effectiveFrom: r.effective_from,
     effectiveTo: r.effective_to,
   };
+}
+
+export async function getCurrentVersion(db: Conn, goalId: string): Promise<GoalVersion | null> {
+  const r = await db.getFirstAsync<any>(
+    `SELECT * FROM goal_versions WHERE goal_id = ? AND effective_to IS NULL ORDER BY version DESC LIMIT 1`,
+    goalId,
+  );
+  if (!r) return null;
+  return mapVersion(r);
+}
+
+/** Version whose effective range includes localDate (for historical reads). */
+export async function getVersionForDate(
+  db: Conn,
+  goalId: string,
+  localDate: string,
+): Promise<GoalVersion | null> {
+  const r = await db.getFirstAsync<any>(
+    `SELECT * FROM goal_versions
+     WHERE goal_id = ?
+       AND effective_from <= ?
+       AND (effective_to IS NULL OR effective_to >= ?)
+     ORDER BY version DESC LIMIT 1`,
+    goalId,
+    localDate,
+    localDate,
+  );
+  if (!r) return null;
+  return mapVersion(r);
+}
+
+export async function closeVersion(db: Db, versionId: string, effectiveTo: string): Promise<void> {
+  await db.runAsync(
+    'UPDATE goal_versions SET effective_to = ? WHERE id = ? AND effective_to IS NULL',
+    effectiveTo,
+    versionId,
+  );
+}
+
+export async function insertGoalVersion(db: Db, version: GoalVersion): Promise<void> {
+  await db.runAsync(
+    `INSERT INTO goal_versions
+     (id, goal_id, version, tier, target_value, schedule_kind, weekly_target_count, notes, effective_from, effective_to)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    version.id,
+    version.goalId,
+    version.version,
+    version.tier,
+    version.targetValue,
+    version.scheduleKind,
+    version.weeklyTargetCount,
+    version.notes,
+    version.effectiveFrom,
+    version.effectiveTo,
+  );
+}
+
+export async function findActiveByTemplateId(db: Conn, templateId: string): Promise<GoalDefinition | null> {
+  const r = await db.getFirstAsync<any>(
+    `SELECT * FROM goal_definitions WHERE template_id = ? AND status != 'archived' LIMIT 1`,
+    templateId,
+  );
+  return r ? mapGoal(r) : null;
 }
 
 export async function upsertTracking(
