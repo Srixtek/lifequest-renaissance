@@ -23,3 +23,27 @@ export function progressTowardTarget(elapsedSec: number, targetSec: number | nul
   if (targetSec == null || targetSec <= 0) return null;
   return Math.min(1, elapsedSec / targetSec);
 }
+
+export const MAX_CHALLENGE_MINUTES = 24 * 60;
+
+export type ParseMinutesResult = { ok: true; minutes: number } | { ok: false; error: string };
+
+/** Custom challenge target: strictly positive, finite, capped. */
+export function parsePositiveTargetMinutes(raw: string, maxMinutes = MAX_CHALLENGE_MINUTES): ParseMinutesResult {
+  const trimmed = raw.trim();
+  if (!trimmed) return { ok: false, error: 'Vide' };
+  const n = Number(trimmed.replace(',', '.'));
+  if (!Number.isFinite(n) || n <= 0) return { ok: false, error: 'Durée invalide' };
+  if (n > maxMinutes) return { ok: false, error: `Durée max ${maxMinutes} min` };
+  return { ok: true, minutes: Math.floor(n) };
+}
+
+/** Sport confirmation: 0 allowed, finite, capped. */
+export function parseSportConfirmMinutes(raw: string, maxMinutes = MAX_CHALLENGE_MINUTES): ParseMinutesResult {
+  const trimmed = raw.trim();
+  if (!trimmed) return { ok: false, error: 'Vide' };
+  const n = Number(trimmed.replace(',', '.'));
+  if (!Number.isFinite(n) || n < 0) return { ok: false, error: 'Minutes invalides' };
+  if (n > maxMinutes) return { ok: false, error: `Durée max ${maxMinutes} min` };
+  return { ok: true, minutes: Math.floor(n) };
+}

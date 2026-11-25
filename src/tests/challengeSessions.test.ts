@@ -1,6 +1,8 @@
 import {
   elapsedSecondsFromUtc,
   formatChallengeHms,
+  parsePositiveTargetMinutes,
+  parseSportConfirmMinutes,
   progressTowardTarget,
 } from '../domain/rules/challengeDuration';
 import {
@@ -39,6 +41,20 @@ describe('challengeDuration', () => {
     expect(progressTowardTarget(600, 1200)).toBe(0.5);
     expect(progressTowardTarget(2000, 1200)).toBe(1);
     expect(progressTowardTarget(10, null)).toBeNull();
+  });
+
+  test('custom minutes reject 0, negative, NaN, Infinity', () => {
+    expect(parsePositiveTargetMinutes('0').ok).toBe(false);
+    expect(parsePositiveTargetMinutes('-5').ok).toBe(false);
+    expect(parsePositiveTargetMinutes('NaN').ok).toBe(false);
+    expect(parsePositiveTargetMinutes('Infinity').ok).toBe(false);
+    expect(parsePositiveTargetMinutes('15').ok).toBe(true);
+  });
+
+  test('sport confirm allows zero and rejects invalid', () => {
+    expect(parseSportConfirmMinutes('0').ok).toBe(true);
+    expect(parseSportConfirmMinutes('-1').ok).toBe(false);
+    expect(parseSportConfirmMinutes('30').ok).toBe(true);
   });
 });
 
@@ -137,6 +153,20 @@ describe('challengeService — transactional mocks', () => {
     if (!again.ok) expect(again.code).toBe('not_running');
   });
 
+  test('end before start rejects close and keeps session running', async () => {
+    const { db, map } = makeDb([]);
+    const start = await startChallengeSession(db as never, 'no_vape', null);
+    expect(start.ok).toBe(true);
+    if (!start.ok) return;
+    const bad = await closeChallengeSession(db as never, start.session.id, 'completed', {
+      endedUtc: '2020-01-01T00:00:00.000Z',
+      requireSportConfirm: false,
+    });
+    expect(bad.ok).toBe(false);
+    if (!bad.ok) expect(bad.code).toBe('invalid_end_time');
+    expect(map.get(start.session.id)?.state).toBe('running');
+  });
+
   test('display uses timestamps not stored tick', () => {
     const session: ChallengeSession = {
       id: 'x',
@@ -156,18 +186,29 @@ describe('challengeService — transactional mocks', () => {
   });
 });
 
+let sqliteNativeForTests: boolean | undefined;
+
 describe('getVersionForDate — SQLite memory', () => {
   afterEach(async () => {
-    await resetDbForTests();
+    if (sqliteNativeForTests) await resetDbForTests();
   });
 
   test('applies version by local date', async () => {
-    let db: Awaited<ReturnType<typeof openMemoryDb>> | null = null;
-    try {
-      db = await openMemoryDb();
-    } catch {
+    if (sqliteNativeForTests === undefined) {
+      try {
+        await openMemoryDb();
+        sqliteNativeForTests = true;
+      } catch (err) {
+        sqliteNativeForTests = false;
+        // eslint-disable-next-line no-console
+        console.warn('[SKIP] getVersionForDate — expo-sqlite indisponible:', err);
+      }
+    }
+    if (!sqliteNativeForTests) {
+      expect(sqliteNativeForTests).toBe(false);
       return;
     }
+    const db = await openMemoryDb();
     const gid = 'g-sqlite';
     const now = '2025-11-26T08:00:00.000Z';
     await db.runAsync(

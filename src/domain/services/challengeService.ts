@@ -12,7 +12,7 @@ export type StartChallengeResult =
 
 export type CloseChallengeResult =
   | { ok: true; session: ChallengeSession }
-  | { ok: false; code: 'not_running' | 'not_found' | 'sport_needs_confirm' };
+  | { ok: false; code: 'not_running' | 'not_found' | 'sport_needs_confirm' | 'invalid_end_time' };
 
 type Conn = Db | SqlRunner;
 
@@ -87,6 +87,12 @@ export async function closeChallengeSession(
       return;
     }
     const endedUtc = opts?.endedUtc ?? new Date().toISOString();
+    const startMs = Date.parse(current.startedUtc);
+    const endMs = Date.parse(endedUtc);
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) {
+      result = { ok: false, code: 'invalid_end_time' };
+      return;
+    }
     const durationSec = elapsedSecondsFromUtc(current.startedUtc, endedUtc);
     const confirmedSec =
       current.type === 'sport' && opts?.userConfirmedDurationSec != null

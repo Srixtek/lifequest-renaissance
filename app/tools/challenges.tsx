@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, Text, View, StyleSheet } from 'react-native';
-import { useLocalSearchParams } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Body, Button, Chip, Field, Screen, Title } from '@/src/design-system/ui';
 import { colors, spacing, typography } from '@/src/design-system/theme';
@@ -24,7 +24,13 @@ import {
   listChallengeHistory,
   startChallengeSession,
 } from '@/src/domain/services/challengeService';
-import { formatChallengeHms, progressTowardTarget } from '@/src/domain/rules/challengeDuration';
+import {
+  formatChallengeHms,
+  parsePositiveTargetMinutes,
+  parseSportConfirmMinutes,
+  progressTowardTarget,
+} from '@/src/domain/rules/challengeDuration';
+import { friendlyDbError } from '@/src/utils/dbErrors';
 
 const TYPES: ChallengeType[] = ['no_vape', 'no_screen', 'sport'];
 
@@ -49,6 +55,8 @@ export default function ChallengesScreen() {
 
   const [tick, setTick] = useState(0);
   const [busy, setBusy] = useState(false);
+  const startLockRef = useRef(false);
+  const closeLockRef = useRef(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [active, setActive] = useState<Record<ChallengeType, ChallengeSession | null>>({
     no_vape: null,
@@ -85,9 +93,11 @@ export default function ChallengesScreen() {
     setHistory(nextHist);
   }, []);
 
-  useEffect(() => {
-    void reload();
-  }, [reload]);
+  useFocusEffect(
+    useCallback(() => {
+      void reload();
+    }, [reload]),
+  );
 
   const hasRunning = useMemo(() => TYPES.some((t) => active[t] != null), [active]);
 
@@ -101,23 +111,38 @@ export default function ChallengesScreen() {
     if (type === 'no_vape') return null;
     const custom = customMin[type].trim();
     if (custom) {
-      const p = Number(custom.replace(',', '.'));
-      if (Number.isFinite(p) && p > 0) return Math.floor(p * 60);
+      const parsed = parsePositiveTargetMinutes(custom);
+      if (parsed.ok) return parsed.minutes * 60;
+      return null;
     }
     const m = targetMin[type];
     return m > 0 ? m * 60 : null;
   };
 
   const start = async (type: ChallengeType) => {
-    if (busy) return;
+    if (startLockRef.current) return;
+    startLockRef.current = true;
     setBusy(true);
     setMsg(null);
     try {
       const db = await getDb();
-      const target = resolvedTargetSec(type);
-      if (type !== 'no_vape' && target == null) {
-        setMsg('Choisis une durée cible (minutes).');
-        return;
+      let target: number | null = null;
+      if (type !== 'no_vape') {
+        const custom = customMin[type].trim();
+        if (custom) {
+          const parsed = parsePositiveTargetMinutes(custom);
+          if (!parsed.ok) {
+            setMsg('Durée personnalisée invalide — nombre positif requis (pas 0, négatif, infini).');
+            return;
+          }
+          target = parsed.minutes * 60;
+        } else {
+          target = resolvedTargetSec(type);
+          if (target == null) {
+            setMsg('Choisis une durée cible (minutes).');
+            return;
+          }
+        }
       }
       const r = await startChallengeSession(db, type, target);
       if (!r.ok) {
@@ -131,7 +156,24 @@ export default function ChallengesScreen() {
           ? 'Défi sans vapoter démarré — le temps est calculé à partir de maintenant.'
           : 'Défi démarré. Tu peux fermer l\'app : le temps sera recalculé au retour.',
       );
+    } catch (err) {
+      setMsg(friendlyDbError(err));
     } finally {
+      startLockRef.current = false;
+      setBusy(false);
+    }
+  };
+
+  const withCloseLock = async (fn: () => Promise<void>) => {
+    if (closeLockRef.current) return;
+    closeLockRef.current = true;
+    setBusy(true);
+    try {
+      await fn();
+    } catch (err) {
+      setMsg(friendlyDbError(err));
+    } finally {
+      closeLockRef.current = false;
       setBusy(false);
     }
   };
@@ -217,40 +259,42 @@ export default function ChallengesScreen() {
                   label="J'ai vapoté"
                   variant="ghost"
                   disabled={busy}
-                  onPress={async () => {
-                    setBusy(true);
-                    try {
+                  onPress={() =>
+                    void withCloseLock(async () => {
                       const db = await getDb();
                       const r = await interruptVapeChallenge(db, running.id);
                       if (!r.ok) {
-                        setMsg('Impossible de clôturer ce défi.');
+                        setMsg(
+                          r.code === 'invalid_end_time'
+                            ? 'Horodatage invalide — le défi reste actif.'
+                            : 'Impossible de clôturer ce défi.',
+                        );
                         return;
                       }
                       setMsg('Défi interrompu — durée conservée. Tu peux en lancer un nouveau.');
                       await reload();
-                    } finally {
-                      setBusy(false);
-                    }
-                  }}
+                    })
+                  }
                 />
                 <Button
                   label="Terminer ce défi"
                   disabled={busy}
-                  onPress={async () => {
-                    setBusy(true);
-                    try {
+                  onPress={() =>
+                    void withCloseLock(async () => {
                       const db = await getDb();
                       const r = await completeVapeChallenge(db, running.id);
                       if (!r.ok) {
-                        setMsg('Impossible de terminer ce défi.');
+                        setMsg(
+                          r.code === 'invalid_end_time'
+                            ? 'Horodatage invalide — le défi reste actif.'
+                            : 'Impossible de terminer ce défi.',
+                        );
                         return;
                       }
                       setMsg('Défi terminé — bravo pour cette période.');
                       await reload();
-                    } finally {
-                      setBusy(false);
-                    }
-                  }}
+                    })
+                  }
                 />
               </View>
             ) : null}
@@ -271,43 +315,45 @@ export default function ChallengesScreen() {
                       <Button
                         label="Respecté"
                         disabled={busy}
-                        onPress={async () => {
-                          setBusy(true);
-                          try {
+                        onPress={() =>
+                          void withCloseLock(async () => {
                             const db = await getDb();
                             const r = await completeScreenChallenge(db, running.id, true);
                             if (!r.ok) {
-                              setMsg('Clôture impossible.');
+                              setMsg(
+                                r.code === 'invalid_end_time'
+                                  ? 'Horodatage invalide — le défi reste actif.'
+                                  : 'Clôture impossible.',
+                              );
                               return;
                             }
                             setScreenClosePending(false);
                             setMsg('Temps sans écran enregistré comme respecté.');
                             await reload();
-                          } finally {
-                            setBusy(false);
-                          }
-                        }}
+                          })
+                        }
                       />
                       <Button
                         label="Interrompu"
                         variant="ghost"
                         disabled={busy}
-                        onPress={async () => {
-                          setBusy(true);
-                          try {
+                        onPress={() =>
+                          void withCloseLock(async () => {
                             const db = await getDb();
                             const r = await completeScreenChallenge(db, running.id, false);
                             if (!r.ok) {
-                              setMsg('Clôture impossible.');
+                              setMsg(
+                                r.code === 'invalid_end_time'
+                                  ? 'Horodatage invalide — le défi reste actif.'
+                                  : 'Clôture impossible.',
+                              );
                               return;
                             }
                             setScreenClosePending(false);
                             setMsg('Défi sans écran interrompu — durée conservée.');
                             await reload();
-                          } finally {
-                            setBusy(false);
-                          }
-                        }}
+                          })
+                        }
                       />
                     </View>
                   </>
@@ -330,34 +376,32 @@ export default function ChallengesScreen() {
                   label="Confirmer et terminer"
                   disabled={busy}
                   onPress={async () => {
-                    const raw = sportConfirmMin.trim().replace(',', '.');
-                    if (!raw) {
-                      setMsg('Confirme la durée réelle avant de terminer.');
+                    const parsed = parseSportConfirmMinutes(sportConfirmMin);
+                    if (!parsed.ok) {
+                      setMsg(
+                        parsed.error === 'Vide'
+                          ? 'Confirme la durée réelle avant de terminer.'
+                          : 'Minutes invalides — nombre fini entre 0 et 24 h.',
+                      );
                       return;
                     }
-                    const minutes = Number(raw);
-                    if (!Number.isFinite(minutes) || minutes < 0) {
-                      setMsg('Minutes invalides — utilise un nombre ≥ 0.');
-                      return;
-                    }
-                    setBusy(true);
-                    try {
+                    await withCloseLock(async () => {
                       const db = await getDb();
-                      const r = await completeSportChallenge(db, running.id, minutes);
+                      const r = await completeSportChallenge(db, running.id, parsed.minutes);
                       if (!r.ok) {
                         setMsg(
                           r.code === 'sport_needs_confirm'
                             ? 'Confirme la durée avant d\'enregistrer le sport.'
-                            : 'Clôture impossible.',
+                            : r.code === 'invalid_end_time'
+                              ? 'Horodatage invalide — le défi reste actif.'
+                              : 'Clôture impossible.',
                         );
                         return;
                       }
                       setSportConfirmMin('');
-                      setMsg(`Activité enregistrée (${minutes} min confirmées).`);
+                      setMsg(`Activité enregistrée (${parsed.minutes} min confirmées).`);
                       await reload();
-                    } finally {
-                      setBusy(false);
-                    }
+                    });
                   }}
                 />
               </>

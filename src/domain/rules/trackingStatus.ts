@@ -112,7 +112,8 @@ export function statusFromLog(
   value: number,
 ): TrackingStatus {
   if (goal.followWithoutXp) {
-    return 'unknown';
+    // Explicit qty (0 included): logged day, neutral — not unknown, not success/fail for bilan XP.
+    return 'partial';
   }
   const target = targetOrNull(version);
   return deriveTrackingStatus(goal.kind, value, target);
