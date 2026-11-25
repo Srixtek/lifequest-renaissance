@@ -9,6 +9,7 @@ export async function recordBreathingSession(
   db: Db,
   durationSec: number,
   completed: boolean,
+  opts?: { shortcut?: boolean },
 ): Promise<{ bonusXp: number }> {
   await db.runAsync(
     `INSERT INTO coping_sessions (id, kind, duration_sec, completed, meta_json, created_at)
@@ -16,7 +17,7 @@ export async function recordBreathingSession(
     createId('cope'),
     durationSec,
     completed ? 1 : 0,
-    JSON.stringify({ pattern: '4-6' }),
+    JSON.stringify(opts?.shortcut ? { pattern: '4-6', shortcut: true } : { pattern: '4-6' }),
     nowIso(),
   );
 

@@ -14,6 +14,7 @@ import { CLASSES } from '@/src/data/content/classes';
 export default function CharacterScreen() {
   const profile = useAppStore((s) => s.profile);
   const character = useAppStore((s) => s.character);
+  const goldBalance = useAppStore((s) => s.goldBalance);
   const [inv, setInv] = useState<any[]>([]);
   const [eq, setEq] = useState<any[]>([]);
 
@@ -68,6 +69,9 @@ export default function CharacterScreen() {
         ))}
         <Text style={styles.section}>Éclats</Text>
         <Body>{character?.shards ?? 0}</Body>
+        <Text style={styles.section}>Or</Text>
+        <Body>{goldBalance}</Body>
+        <Body muted>L'or vient des quêtes. Il n'est pas encore dépensable : la boutique d'Eloria ouvrira plus tard.</Body>
       </ScrollView>
     </Screen>
   );

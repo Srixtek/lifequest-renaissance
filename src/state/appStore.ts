@@ -12,6 +12,7 @@ interface AppState {
   profile: Profile | null;
   goals: GoalDefinition[];
   character: CharacterProgress | null;
+  goldBalance: number;
   today: string;
   todayTracking: Record<string, TrackingEvent | null>;
   bootstrap: () => Promise<void>;
@@ -23,6 +24,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   profile: null,
   goals: [],
   character: null,
+  goldBalance: 0,
   today: localDateWithDayStart(new Date(), 4),
   todayTracking: {},
   bootstrap: async () => {
@@ -45,6 +47,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       profile,
       goals,
       character: await rpgRepo.getCharacter(db),
+      goldBalance: await rpgRepo.getGoldBalance(db),
       today,
       todayTracking,
     });

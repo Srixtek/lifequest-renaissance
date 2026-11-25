@@ -1,10 +1,13 @@
 import type { Db } from '../../data/db/client';
+import type { SqlRunner } from '../../data/db/sqlRunner';
 import * as rpgRepo from '../../data/db/repositories/rpgRepo';
 import { ITEMS } from '../../data/content/items';
 import { MAP_NODES } from '../../data/content/map';
 import { CAMP_UPGRADE_SHARD_COST } from '../rules/xp';
 
-export async function getAdventureView(db: Db) {
+type Conn = Db | SqlRunner;
+
+export async function getAdventureView(db: Conn) {
   const adv = await rpgRepo.getAdventure(db);
   const node = MAP_NODES[adv.currentNode] ?? MAP_NODES.camp_gate;
   const equipment = await rpgRepo.listEquipment(db);
@@ -18,39 +21,50 @@ export async function getAdventureView(db: Db) {
   return { ...adv, node, locked, equippedEffects: [...equippedEffects] };
 }
 
+/**
+ * Un choix qui donne un objet (ou des éclats) ne le donne qu'une fois : le drapeau `setFlag`
+ * est lu et écrit dans la même transaction exclusive (double tap / rejeu sans doublon).
+ */
 export async function chooseAdventure(db: Db, choiceId: string): Promise<{ ok: boolean; message: string }> {
-  const view = await getAdventureView(db);
-  if (view.locked) {
-    return { ok: false, message: 'Il te faut la lanterne équipée pour voir clairement.' };
-  }
-  const choice = view.node.choices.find((c) => c.id === choiceId);
-  if (!choice) return { ok: false, message: 'Choix invalide' };
+  let result: { ok: boolean; message: string } = { ok: false, message: 'Choix invalide' };
+  await db.withExclusiveTransactionAsync(async (tx) => {
+    const view = await getAdventureView(tx);
+    if (view.locked) {
+      result = { ok: false, message: 'Il te faut la lanterne équipée pour voir clairement.' };
+      return;
+    }
+    const choice = view.node.choices.find((c) => c.id === choiceId);
+    if (!choice) return;
 
-  const next = MAP_NODES[choice.to];
-  if (!next) return { ok: false, message: 'Destination inconnue' };
+    const next = MAP_NODES[choice.to];
+    if (!next) {
+      result = { ok: false, message: 'Destination inconnue' };
+      return;
+    }
 
-  if (next.requiresItemEffect && !view.equippedEffects.includes(next.requiresItemEffect)) {
-    // Allow moving there but content stays veiled — still move.
-  }
+    const hasLoot = !!(choice.grantItem || choice.grantShards);
+    if (hasLoot && choice.setFlag && (await rpgRepo.getFlag(tx, choice.setFlag)) === '1') {
+      result = { ok: true, message: 'Tu as déjà tout récupéré ici.' };
+      return;
+    }
 
-  const visited = view.visited.includes(choice.to) ? view.visited : [...view.visited, choice.to];
-  const choiceLog = [...view.choiceLog, { at: new Date().toISOString(), from: view.currentNode, choiceId }];
+    const visited = view.visited.includes(choice.to) ? view.visited : [...view.visited, choice.to];
+    const choiceLog = [...view.choiceLog, { at: new Date().toISOString(), from: view.currentNode, choiceId }];
 
-  await db.withTransactionAsync(async () => {
-    await rpgRepo.setAdventure(db, choice.to, visited, choiceLog);
-    if (choice.grantItem) await rpgRepo.grantItem(db, choice.grantItem);
+    await rpgRepo.setAdventure(tx, choice.to, visited, choiceLog);
+    if (choice.grantItem) await rpgRepo.grantItem(tx, choice.grantItem);
     if (choice.grantShards) {
       await rpgRepo.addShards(
-        db,
+        tx,
         choice.grantShards,
         `aventure:${choiceId}`,
         `adv-shards:${view.currentNode}:${choiceId}:${choice.grantItem ?? 'x'}`,
       );
     }
-    if (choice.setFlag) await rpgRepo.setFlag(db, choice.setFlag, '1');
+    if (choice.setFlag) await rpgRepo.setFlag(tx, choice.setFlag, '1');
+    result = { ok: true, message: next.title };
   });
-
-  return { ok: true, message: next.title };
+  return result;
 }
 
 export async function equipLantern(db: Db): Promise<{ ok: boolean; message: string }> {

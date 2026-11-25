@@ -39,6 +39,7 @@ export default function CampScreen() {
   const router = useRouter();
   const profile = useAppStore((s) => s.profile);
   const character = useAppStore((s) => s.character);
+  const goldBalance = useAppStore((s) => s.goldBalance);
   const goals = useAppStore((s) => s.goals);
   const todayTracking = useAppStore((s) => s.todayTracking);
   const refresh = useAppStore((s) => s.refresh);
@@ -94,6 +95,10 @@ export default function CampScreen() {
             <View style={styles.resourceBox}>
               <Text style={styles.resourceValue}>{shards}</Text>
               <Text style={styles.resourceLabel}>Éclats</Text>
+            </View>
+            <View style={styles.resourceBox}>
+              <Text style={styles.resourceValue}>{goldBalance}</Text>
+              <Text style={styles.resourceLabel}>Or</Text>
             </View>
           </View>
         </FantasyPanel>

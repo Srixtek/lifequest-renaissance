@@ -5,3 +5,5 @@ Tables : profiles, goal_definitions, goal_versions, tracking_events, journal_ent
 - Tracking par défaut : `unknown` (Non renseigné).
 - XP : ledger immuable + `idempotency_key` unique.
 - Objectifs versionnés (`goal_versions`) pour changements de plan sans recalcul silencieux d'XP passée.
+- `quest_instances` (migration 005) : `status` accepted|claimed|abandoned, `accepted_at`, `claimed_at`, `abandoned_at`, un enregistrement par quête.
+- Or : `wallet_ledger.resource = 'gold'`, append-only, solde = somme du ledger.
