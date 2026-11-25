@@ -1,5 +1,6 @@
 import type { SqlRunner } from '../sqlRunner';
 import type { Db } from '../client';
+import { createId } from '../../../utils/id';
 import type { CharacterProgress, EquipmentSlot, InventoryItem } from '../../../domain/models/types';
 
 type Conn = Db | SqlRunner;
@@ -34,17 +35,17 @@ export async function addShards(db: Conn, amount: number, reason: string, idempo
   }
 }
 
-export async function spendShards(db: Db, amount: number, reason: string, idempotencyKey: string): Promise<boolean> {
+export async function spendShards(db: Conn, amount: number, reason: string, idempotencyKey: string): Promise<boolean> {
   const c = await getCharacter(db);
   if (c.shards < amount) return false;
   return addShards(db, -amount, reason, idempotencyKey);
 }
 
-export async function setCampLevel(db: Db, level: number): Promise<void> {
+export async function setCampLevel(db: Conn, level: number): Promise<void> {
   await db.runAsync('UPDATE character_progress SET camp_level = ? WHERE id = 1', level);
 }
 
-export async function listInventory(db: Db): Promise<InventoryItem[]> {
+export async function listInventory(db: Conn): Promise<InventoryItem[]> {
   const rows = await db.getAllAsync<any>('SELECT * FROM inventory_items ORDER BY acquired_at');
   return rows.map((r) => ({
     id: r.id,
@@ -54,7 +55,7 @@ export async function listInventory(db: Db): Promise<InventoryItem[]> {
   }));
 }
 
-export async function grantItem(db: Db, itemId: string): Promise<void> {
+export async function grantItem(db: Conn, itemId: string): Promise<void> {
   const existing = await db.getFirstAsync<any>('SELECT * FROM inventory_items WHERE item_id = ?', itemId);
   if (existing) {
     await db.runAsync('UPDATE inventory_items SET quantity = quantity + 1 WHERE item_id = ?', itemId);
@@ -68,16 +69,16 @@ export async function grantItem(db: Db, itemId: string): Promise<void> {
   }
 }
 
-export async function listEquipment(db: Db): Promise<EquipmentSlot[]> {
+export async function listEquipment(db: Conn): Promise<EquipmentSlot[]> {
   const rows = await db.getAllAsync<any>('SELECT * FROM equipment_slots');
   return rows.map((r) => ({ slot: r.slot, itemId: r.item_id }));
 }
 
-export async function equipItem(db: Db, slot: string, itemId: string | null): Promise<void> {
+export async function equipItem(db: Conn, slot: string, itemId: string | null): Promise<void> {
   await db.runAsync('UPDATE equipment_slots SET item_id = ? WHERE slot = ?', itemId, slot);
 }
 
-export async function getAdventure(db: Db): Promise<{ currentNode: string; visited: string[]; choiceLog: any[] }> {
+export async function getAdventure(db: Conn): Promise<{ currentNode: string; visited: string[]; choiceLog: any[] }> {
   const r = await db.getFirstAsync<any>('SELECT * FROM adventure_state WHERE id = 1');
   return {
     currentNode: r.current_node,
@@ -87,7 +88,7 @@ export async function getAdventure(db: Db): Promise<{ currentNode: string; visit
 }
 
 export async function setAdventure(
-  db: Db,
+  db: Conn,
   currentNode: string,
   visited: string[],
   choiceLog: any[],
@@ -100,15 +101,59 @@ export async function setAdventure(
   );
 }
 
-export async function getFlag(db: Db, key: string): Promise<string | null> {
+export async function getFlag(db: Conn, key: string): Promise<string | null> {
   const r = await db.getFirstAsync<{ value: string }>('SELECT value FROM story_flags WHERE key = ?', key);
   return r?.value ?? null;
 }
 
-export async function setFlag(db: Db, key: string, value: string): Promise<void> {
+export async function setFlag(db: Conn, key: string, value: string): Promise<void> {
   await db.runAsync(
     `INSERT INTO story_flags (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`,
     key,
     value,
   );
+}
+
+export const GOLD_RESOURCE = 'gold';
+
+/** Solde d'or = somme du ledger append-only (aucune colonne de cache). */
+export async function getGoldBalance(db: Conn): Promise<number> {
+  const r = await db.getFirstAsync<{ s: number | null }>(
+    `SELECT COALESCE(SUM(amount), 0) AS s FROM wallet_ledger WHERE resource = 'gold'`,
+  );
+  return Number(r?.s ?? 0);
+}
+
+/**
+ * Crédite de l'or une seule fois par clé d'idempotence. Appeler dans une transaction du parent.
+ * Un montant non entier ou <= 0 est refusé (l'or n'est pas dépensable en 004C-1).
+ */
+export async function addGold(
+  db: Conn,
+  amount: number,
+  reason: string,
+  idempotencyKey: string,
+  createdAt: string = new Date().toISOString(),
+): Promise<'inserted' | 'duplicate'> {
+  if (!Number.isInteger(amount) || amount <= 0) throw new Error('Montant d\'or invalide');
+  const existing = await db.getFirstAsync<{ id: string }>(
+    'SELECT id FROM wallet_ledger WHERE idempotency_key = ?',
+    idempotencyKey,
+  );
+  if (existing) return 'duplicate';
+  try {
+    await db.runAsync(
+      `INSERT INTO wallet_ledger (id, resource, amount, reason, idempotency_key, created_at)
+       VALUES (?, 'gold', ?, ?, ?, ?)`,
+      createId('wal'),
+      amount,
+      reason,
+      idempotencyKey,
+      createdAt,
+    );
+    return 'inserted';
+  } catch (err: unknown) {
+    if (String((err as Error)?.message ?? err).toLowerCase().includes('unique')) return 'duplicate';
+    throw err;
+  }
 }

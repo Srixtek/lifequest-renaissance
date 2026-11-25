@@ -108,7 +108,7 @@ export default function BreathingScreen() {
           setRunning(false);
           setRemaining(0);
           const db = await getDb();
-          const r = await recordBreathingSession(db, minutes * 60, true);
+          const r = await recordBreathingSession(db, minutes * 60, true, { shortcut: true });
           await refresh();
           setMsg(r.bonusXp > 0 ? `Terminé. +${r.bonusXp} XP (1ʳᵉ fois)` : 'Terminé.');
         }}
