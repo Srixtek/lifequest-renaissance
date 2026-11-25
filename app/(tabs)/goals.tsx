@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, View, Text, StyleSheet } from 'react-native';
 import { Body, Button, Chip, Field, Screen, Title } from '@/src/design-system/ui';
 import { colors, spacing } from '@/src/design-system/theme';
@@ -50,8 +50,12 @@ export default function GoalsScreen() {
   const [pendingTemplateId, setPendingTemplateId] = useState<string | null>(null);
   const [templateTargetDraft, setTemplateTargetDraft] = useState('');
   const [actionBusy, setActionBusy] = useState(false);
+  const actionLockRef = useRef(false);
 
-  const activeGoals = goals.filter((g) => g.status !== 'archived');
+  const activeGoals = useMemo(
+    () => goals.filter((g) => g.status !== 'archived'),
+    [goals],
+  );
   const activeGoalIdsKey = useMemo(
     () => activeGoals.map((g) => g.id).sort().join('\0'),
     [activeGoals],
@@ -61,6 +65,10 @@ export default function GoalsScreen() {
     const added = new Set(goals.map((g) => g.templateId).filter(Boolean));
     return GOAL_TEMPLATES.filter((t) => added.has(t.id));
   }, [goals]);
+
+  const showFeedback = (msg: string) => {
+    setFlash(msg);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -74,26 +82,27 @@ export default function GoalsScreen() {
           const v = await getCurrentVersion(db, g.id);
           next[g.id] = { unit: g.unit, target: v?.targetValue ?? null };
         }
-        if (!cancelled) setVersions(next);
+        if (cancelled) return;
+        setVersions(goalsSnapshot.length === 0 ? {} : next);
       } catch {
-        // ignore load errors after unmount or transient DB failure
+        if (!cancelled) showFeedback('Chargement des cibles impossible.');
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [activeGoalIdsKey, activeGoals]);
-
-  const showFeedback = (msg: string) => {
-    setFlash(msg);
-  };
+  }, [activeGoalIdsKey]);
 
   const runAction = async (fn: () => Promise<void>) => {
-    if (actionBusy) return;
+    if (actionLockRef.current) return;
+    actionLockRef.current = true;
     setActionBusy(true);
     try {
       await fn();
+    } catch {
+      showFeedback('Action impossible pour le moment.');
     } finally {
+      actionLockRef.current = false;
       setActionBusy(false);
     }
   };
@@ -135,16 +144,20 @@ export default function GoalsScreen() {
   const beginTemplate = async (templateId: string) => {
     const t = GOAL_TEMPLATES.find((x) => x.id === templateId);
     if (!t) return;
-    const db = await getDb();
-    const existing = (await listGoals(db, true)).some(
-      (g) => g.templateId === templateId && g.status !== 'archived',
-    );
-    if (existing) {
-      showFeedback('Ce modèle est déjà actif.');
-      return;
+    try {
+      const db = await getDb();
+      const existing = (await listGoals(db, true)).some(
+        (g) => g.templateId === templateId && g.status !== 'archived',
+      );
+      if (existing) {
+        showFeedback('Ce modèle est déjà actif.');
+        return;
+      }
+      setPendingTemplateId(templateId);
+      setTemplateTargetDraft(t.targetValue != null ? String(t.targetValue) : '');
+    } catch {
+      showFeedback('Impossible de vérifier ce modèle pour le moment.');
     }
-    setPendingTemplateId(templateId);
-    setTemplateTargetDraft(t.targetValue != null ? String(t.targetValue) : '');
   };
 
   const confirmTemplate = async () => {
@@ -373,19 +386,23 @@ export default function GoalsScreen() {
               <View style={styles.row}>
                 <Chip
                   label={g.status === 'paused' ? 'Reprendre' : 'Pause'}
-                  onPress={async () => {
-                    const db = await getDb();
-                    await setGoalStatus(db, g.id, g.status === 'paused' ? 'active' : 'paused');
-                    await refresh();
+                  onPress={() => {
+                    void runAction(async () => {
+                      const db = await getDb();
+                      await setGoalStatus(db, g.id, g.status === 'paused' ? 'active' : 'paused');
+                      await refresh();
+                    });
                   }}
                 />
                 <Chip
                   label="Archiver"
-                  onPress={async () => {
-                    const db = await getDb();
-                    await setGoalStatus(db, g.id, 'archived');
-                    showFeedback('Archivé — l\'historique est conservé.');
-                    await refresh();
+                  onPress={() => {
+                    void runAction(async () => {
+                      const db = await getDb();
+                      await setGoalStatus(db, g.id, 'archived');
+                      showFeedback('Archivé — l\'historique est conservé.');
+                      await refresh();
+                    });
                   }}
                 />
               </View>
