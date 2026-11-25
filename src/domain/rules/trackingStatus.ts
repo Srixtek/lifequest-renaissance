@@ -107,10 +107,13 @@ export function validateCreationTarget(kind: GoalKind, raw: string): ValidateTar
 }
 
 export function statusFromLog(
-  goal: Pick<GoalDefinition, 'kind'>,
+  goal: Pick<GoalDefinition, 'kind' | 'followWithoutXp'>,
   version: GoalVersion | null,
   value: number,
 ): TrackingStatus {
+  if (goal.followWithoutXp) {
+    return 'partial';
+  }
   const target = targetOrNull(version);
   return deriveTrackingStatus(goal.kind, value, target);
 }

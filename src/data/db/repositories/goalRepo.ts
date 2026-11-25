@@ -28,7 +28,7 @@ function mapGoal(r: any): GoalDefinition {
 }
 
 export async function insertGoal(
-  db: Db,
+  db: Conn,
   goal: GoalDefinition,
   version: GoalVersion,
 ): Promise<void> {
@@ -65,7 +65,7 @@ export async function insertGoal(
 }
 
 export async function setGoalStatus(
-  db: Db,
+  db: Conn,
   goalId: string,
   status: 'active' | 'paused' | 'archived',
 ): Promise<void> {
@@ -116,7 +116,7 @@ export async function getVersionForDate(
   return mapVersion(r);
 }
 
-export async function closeVersion(db: Db, versionId: string, effectiveTo: string): Promise<void> {
+export async function closeVersion(db: Conn, versionId: string, effectiveTo: string): Promise<void> {
   await db.runAsync(
     'UPDATE goal_versions SET effective_to = ? WHERE id = ? AND effective_to IS NULL',
     effectiveTo,
@@ -124,7 +124,7 @@ export async function closeVersion(db: Db, versionId: string, effectiveTo: strin
   );
 }
 
-export async function insertGoalVersion(db: Db, version: GoalVersion): Promise<void> {
+export async function insertGoalVersion(db: Conn, version: GoalVersion): Promise<void> {
   await db.runAsync(
     `INSERT INTO goal_versions
      (id, goal_id, version, tier, target_value, schedule_kind, weekly_target_count, notes, effective_from, effective_to)
@@ -140,6 +140,23 @@ export async function insertGoalVersion(db: Db, version: GoalVersion): Promise<v
     version.effectiveFrom,
     version.effectiveTo,
   );
+}
+
+export async function patchGoalVersion(
+  db: Conn,
+  versionId: string,
+  patch: { targetValue?: number; weeklyTargetCount?: number },
+): Promise<void> {
+  if (patch.targetValue !== undefined) {
+    await db.runAsync('UPDATE goal_versions SET target_value = ? WHERE id = ?', patch.targetValue, versionId);
+  }
+  if (patch.weeklyTargetCount !== undefined) {
+    await db.runAsync(
+      'UPDATE goal_versions SET weekly_target_count = ? WHERE id = ?',
+      patch.weeklyTargetCount,
+      versionId,
+    );
+  }
 }
 
 export async function findActiveByTemplateId(db: Conn, templateId: string): Promise<GoalDefinition | null> {

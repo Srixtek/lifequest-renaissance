@@ -121,26 +121,41 @@ describe('countWeeklySuccessDays', () => {
 });
 
 describe('getVersionForDate — deferred activation', () => {
-  const mkDb = (rows: any[]) => ({
-    getFirstAsync: jest.fn().mockResolvedValue(rows[0] ?? null),
-  });
+  const v1Row = {
+    id: 'v1',
+    goal_id: 'g1',
+    version: 1,
+    tier: 'normal',
+    target_value: 5,
+    schedule_kind: 'daily',
+    weekly_target_count: null,
+    notes: null,
+    effective_from: '2025-11-01',
+    effective_to: '2025-11-26',
+  };
+  const v2Row = {
+    id: 'v2',
+    goal_id: 'g1',
+    version: 2,
+    tier: 'normal',
+    target_value: 10,
+    schedule_kind: 'daily',
+    weekly_target_count: null,
+    notes: null,
+    effective_from: '2025-11-27',
+    effective_to: null,
+  };
 
-  test('picks version by effective range', async () => {
-    const db = mkDb([
-      {
-        id: 'v2',
-        goal_id: 'g1',
-        version: 2,
-        tier: 'normal',
-        target_value: 10,
-        schedule_kind: 'daily',
-        weekly_target_count: null,
-        notes: null,
-        effective_from: addDays('2025-11-20', 1),
-        effective_to: null,
-      },
-    ]);
-    const v = await getVersionForDate(db as never, 'g1', '2025-11-20');
-    expect(v?.targetValue).toBe(10);
+  test('today keeps closed version; tomorrow uses scheduled version', async () => {
+    const db = {
+      getFirstAsync: jest.fn(async (_sql: string, _gid: string, localDate: string) => {
+        if (localDate <= '2025-11-26') return v1Row;
+        return v2Row;
+      }),
+    };
+    const today = await getVersionForDate(db as never, 'g1', '2025-11-26');
+    const tomorrow = await getVersionForDate(db as never, 'g1', addDays('2025-11-26', 1));
+    expect(today?.targetValue).toBe(5);
+    expect(tomorrow?.targetValue).toBe(10);
   });
 });

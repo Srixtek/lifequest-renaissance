@@ -72,6 +72,14 @@ describe('mission templates kinds', () => {
   });
 
   test('statusFromLog for reduce', () => {
-    expect(statusFromLog({ kind: 'reduce' }, { targetValue: 1 } as any, 0)).toBe('success');
+    expect(statusFromLog({ kind: 'reduce', followWithoutXp: false }, { targetValue: 1 } as any, 0)).toBe(
+      'success',
+    );
+  });
+
+  test('measure mode (followWithoutXp) stays neutral', () => {
+    expect(
+      statusFromLog({ kind: 'limit', followWithoutXp: true }, { targetValue: 5 } as any, 99),
+    ).toBe('partial');
   });
 });

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ScrollView, View, Text, StyleSheet } from 'react-native';
+import { Pressable, ScrollView, View, Text, StyleSheet } from 'react-native';
 import { Body, Button, Chip, Field, Screen, Title } from '@/src/design-system/ui';
 import { colors, spacing, typography } from '@/src/design-system/theme';
 import { FantasyPanel } from '@/src/design-system/FantasyPanel';
@@ -9,11 +9,15 @@ import { useAppStore } from '@/src/state/appStore';
 import { getDb } from '@/src/data/db/client';
 import { confirmGoalDay, logGoalNumeric } from '@/src/domain/services/trackingService';
 import {
-  getCurrentVersion,
+  getVersionForDate,
+  insertGoal,
   listTrackingInRange,
   setGoalStatus,
 } from '@/src/data/db/repositories/goalRepo';
-import { GOAL_TEMPLATES } from '@/src/data/content/goalTemplates';
+import { GOAL_KIND_LABELS, GOAL_TEMPLATES } from '@/src/data/content/goalTemplates';
+import { createId } from '@/src/utils/id';
+import { nowIso } from '@/src/domain/rules/dates';
+import type { GoalTier } from '@/src/domain/models/types';
 import { HabitSetupFlow } from '@/src/design-system/HabitSetupFlow';
 import { scheduleVersionUpdate } from '@/src/domain/services/goalLifecycleService';
 import {
@@ -38,6 +42,16 @@ const STATUS_FR: Record<TrackingStatus, string> = {
   paused: 'En pause',
 };
 
+const CUSTOM_KINDS: GoalKind[] = ['habit', 'abstinence', 'limit', 'reduce', 'duration', 'quantity'];
+
+function displayStatus(goal: GoalDefinition, status: TrackingStatus, hasValue: boolean): string {
+  if (goal.followWithoutXp && usesNumericLog(goal.kind)) {
+    if (status === 'unknown' && !hasValue) return 'Non renseigné';
+    if (hasValue || status !== 'unknown') return 'Renseigné';
+  }
+  return STATUS_FR[status];
+}
+
 export default function GoalsScreen() {
   const goals = useAppStore((s) => s.goals);
   const today = useAppStore((s) => s.today);
@@ -60,6 +74,12 @@ export default function GoalsScreen() {
   const [editTargetDraft, setEditTargetDraft] = useState<Record<string, string>>({});
   const [actionBusy, setActionBusy] = useState(false);
   const actionLockRef = useRef(false);
+  const [showCustom, setShowCustom] = useState(false);
+  const [customTitle, setCustomTitle] = useState('');
+  const [customKind, setCustomKind] = useState<GoalKind>('habit');
+  const [customUnit, setCustomUnit] = useState('');
+  const [customTarget, setCustomTarget] = useState('');
+  const [customTier, setCustomTier] = useState<GoalTier>('normal');
 
   const activeGoals = useMemo(
     () => goals.filter((g) => g.status !== 'archived'),
@@ -90,7 +110,7 @@ export default function GoalsScreen() {
         const { start, end } = weekBoundsMondaySunday(today);
         for (const g of goalsSnapshot) {
           if (cancelled) return;
-          const v = await getCurrentVersion(db, g.id);
+          const v = await getVersionForDate(db, g.id, today);
           next[g.id] = {
             unit: g.unit,
             target: v?.targetValue ?? null,
@@ -113,6 +133,18 @@ export default function GoalsScreen() {
       cancelled = true;
     };
   }, [activeGoalIdsKey, today]);
+
+  const refreshWeeklyForGoal = async (goalId: string) => {
+    const db = await getDb();
+    const v = await getVersionForDate(db, goalId, today);
+    if (v?.scheduleKind !== 'weekly') return;
+    const { start, end } = weekBoundsMondaySunday(today);
+    const rows = await listTrackingInRange(db, goalId, start, end);
+    setWeeklyDone((prev) => ({
+      ...prev,
+      [goalId]: countWeeklySuccessDays(rows, start, end),
+    }));
+  };
 
   const runAction = async (fn: () => Promise<void>) => {
     if (actionLockRef.current) return;
@@ -165,6 +197,7 @@ export default function GoalsScreen() {
         const shard = r.shardsGranted ? ' · +1 éclat de participation' : '';
         showFeedback(`Enregistré.${shard}`);
       }
+      await refreshWeeklyForGoal(goalId);
       await refresh();
     });
   };
@@ -198,7 +231,62 @@ export default function GoalsScreen() {
       } else {
         showFeedback(`Valeur ${parsed.value} enregistrée (${STATUS_FR[r.status]}).`);
       }
+      await refreshWeeklyForGoal(goal.id);
       await refresh();
+    });
+  };
+
+  const createCustom = async () => {
+    await runAction(async () => {
+      const title = customTitle.trim();
+      if (!title) {
+        showFeedback('Donne un nom à l\'habitude.');
+        return;
+      }
+      const targetCheck = validateCreationTarget(customKind, customTarget);
+      if (!targetCheck.ok) {
+        showFeedback(targetCheck.error);
+        return;
+      }
+      const db = await getDb();
+      const goalId = createId('goal');
+      const createdAt = nowIso();
+      const unit = customUnit.trim() || null;
+      await db.withExclusiveTransactionAsync(async (tx) => {
+        await insertGoal(
+          tx,
+          {
+            id: goalId,
+            title,
+            kind: customKind,
+            unit,
+            weight: 1,
+            status: 'active',
+            templateId: null,
+            sensitive: false,
+            followWithoutXp: false,
+            createdAt,
+          },
+          {
+            id: createId('gver'),
+            goalId,
+            version: 1,
+            tier: customTier,
+            targetValue: targetCheck.value,
+            scheduleKind: 'daily',
+            weeklyTargetCount: null,
+            notes: null,
+            effectiveFrom: createdAt.slice(0, 10),
+            effectiveTo: null,
+          },
+        );
+      });
+      setCustomTitle('');
+      setCustomUnit('');
+      setCustomTarget('');
+      setShowCustom(false);
+      await refresh();
+      showFeedback(`Habitude personnalisée « ${title} » créée.`);
     });
   };
 
@@ -262,7 +350,9 @@ export default function GoalsScreen() {
 
         {activeGoals.map((g) => {
           const tr = todayTracking[g.id];
-          const status = g.status === 'paused' ? 'paused' : (tr?.status ?? 'unknown');
+          const rawStatus = g.status === 'paused' ? 'paused' : (tr?.status ?? 'unknown');
+          const status = rawStatus;
+          const statusLabel = displayStatus(g, rawStatus, tr?.value != null);
           const ver = versions[g.id];
           const numeric = usesNumericLog(g.kind);
           const savedValue =
@@ -293,6 +383,7 @@ export default function GoalsScreen() {
               title={g.title}
               category={tpl?.category}
               status={status}
+              statusLabel={statusLabel}
               targetLabel={targetLabel}
               valueLabel={savedValue}
               progress={progress}
@@ -445,6 +536,71 @@ export default function GoalsScreen() {
           />
         </FantasyPanel>
 
+        <FantasyPanel>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => setShowCustom((v) => !v)}
+            style={styles.customToggle}
+          >
+            <Text style={styles.sectionHeading}>Créer une habitude personnalisée</Text>
+            <Body muted>{showCustom ? 'Masquer' : 'Déplier pour nom, type, unité et cible'}</Body>
+          </Pressable>
+          {showCustom ? (
+            <View>
+              <Field value={customTitle} onChangeText={setCustomTitle} placeholder="Nom" />
+              <Body muted>Type</Body>
+              <View style={styles.row}>
+                {CUSTOM_KINDS.map((k) => (
+                  <Chip
+                    key={k}
+                    label={GOAL_KIND_LABELS[k]}
+                    selected={customKind === k}
+                    onPress={() => {
+                      setCustomKind(k);
+                      if (!kindRequiresNumericTarget(k)) setCustomTarget('');
+                    }}
+                  />
+                ))}
+              </View>
+              <Field value={customUnit} onChangeText={setCustomUnit} placeholder="Unité (facultatif)" />
+              {kindRequiresNumericTarget(customKind) ? (
+                <Field
+                  value={customTarget}
+                  onChangeText={setCustomTarget}
+                  placeholder="Cible numérique (obligatoire)"
+                  keyboardType="decimal-pad"
+                />
+              ) : (
+                <Body muted>Pas de cible numérique pour ce type.</Body>
+              )}
+              <View style={styles.row}>
+                {(['minimal', 'normal', 'ambitieux'] as GoalTier[]).map((tier) => (
+                  <Chip
+                    key={tier}
+                    label={tier}
+                    selected={customTier === tier}
+                    onPress={() => setCustomTier(tier)}
+                  />
+                ))}
+              </View>
+              <View style={styles.row}>
+                <Button label="Créer l'habitude" onPress={() => void createCustom()} disabled={actionBusy} />
+                <Button
+                  label="Annuler"
+                  onPress={() => {
+                    setShowCustom(false);
+                    setCustomTitle('');
+                    setCustomUnit('');
+                    setCustomTarget('');
+                  }}
+                  variant="ghost"
+                  disabled={actionBusy}
+                />
+              </View>
+            </View>
+          ) : null}
+        </FantasyPanel>
+
         {templateNotes.some((t) => t.alcoholSafety || t.nicotineNote) ? (
           <View style={styles.note}>
             <Body muted>{HEALTH_GUARDRAIL}</Body>
@@ -475,4 +631,5 @@ const styles = StyleSheet.create({
     borderColor: colors.line,
     backgroundColor: colors.bg,
   },
+  customToggle: { marginBottom: spacing.sm },
 });

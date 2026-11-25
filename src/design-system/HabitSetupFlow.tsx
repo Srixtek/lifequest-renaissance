@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Pressable, View, Text, StyleSheet } from 'react-native';
 import { Body, Button, Chip, Field } from './ui';
 import { colors, spacing, typography } from './theme';
@@ -22,6 +22,7 @@ import {
 } from '@/src/domain/services/goalLifecycleService';
 import { validateCreationTarget } from '@/src/domain/rules/trackingStatus';
 import type { GoalTier } from '@/src/domain/models/types';
+import { friendlyDbError } from '@/src/utils/dbErrors';
 
 const CATEGORIES: HabitCategory[] = ['A', 'B', 'C', 'D', 'E', 'F'];
 
@@ -44,6 +45,8 @@ export function HabitSetupFlow({
   const [targetDraft, setTargetDraft] = useState('');
   const [weeklyDraft, setWeeklyDraft] = useState(String(DEFAULT_WEEKLY_CALL_TARGET));
   const [tier] = useState<GoalTier>('normal');
+  const [createBusy, setCreateBusy] = useState(false);
+  const createLockRef = useRef(false);
 
   const reset = () => {
     setStep('category');
@@ -54,7 +57,7 @@ export function HabitSetupFlow({
   };
 
   const confirmCreate = async () => {
-    if (!category || !intention) return;
+    if (!category || !intention || createLockRef.current || disabled) return;
     const plan = resolveHabitPlan(
       category,
       intention,
@@ -79,24 +82,37 @@ export function HabitSetupFlow({
       plan.weeklyTargetCount = w;
     }
 
-    const db = await getDb();
-    const existing = await findActiveByTemplateId(db, plan.templateId);
-    if (existing) {
-      if (existing.kind === plan.kind && existing.followWithoutXp === plan.followWithoutXp) {
-        onFeedback('Cette habitude est déjà active avec la même intention.');
-        return;
+    createLockRef.current = true;
+    setCreateBusy(true);
+    try {
+      const db = await getDb();
+      const existing = await findActiveByTemplateId(db, plan.templateId);
+      if (existing) {
+        if (existing.kind === plan.kind && existing.followWithoutXp === plan.followWithoutXp) {
+          onFeedback('Cette habitude est déjà active avec la même intention.');
+          return;
+        }
+        await archiveAndRecreateForModeChange(db, existing, plan, targetValue, tier);
+        onFeedback(
+          'Intention mise à jour — l\'ancien objectif est archivé, l\'historique est conservé.',
+        );
+      } else {
+        await db.withExclusiveTransactionAsync(async (tx) => {
+          await createHabitGoal(tx, plan, targetValue, tier);
+        });
+        onFeedback(`Habitude « ${plan.title} » ajoutée.`);
       }
-      await archiveAndRecreateForModeChange(db, existing, plan, targetValue, tier);
-      onFeedback(
-        'Intention mise à jour — l\'ancien objectif est archivé, l\'historique est conservé.',
-      );
-    } else {
-      await createHabitGoal(db, plan, targetValue, tier);
-      onFeedback(`Habitude « ${plan.title} » ajoutée.`);
+      reset();
+      await onDone();
+    } catch (err) {
+      onFeedback(friendlyDbError(err));
+    } finally {
+      createLockRef.current = false;
+      setCreateBusy(false);
     }
-    reset();
-    await onDone();
   };
+
+  const flowDisabled = disabled || createBusy;
 
   return (
     <View>
@@ -137,7 +153,7 @@ export function HabitSetupFlow({
               />
             ))}
           </View>
-          <Button label="Retour" variant="ghost" onPress={() => setStep('category')} disabled={disabled} />
+          <Button label="Retour" variant="ghost" onPress={() => setStep('category')} disabled={flowDisabled} />
         </View>
       ) : null}
 
@@ -175,13 +191,13 @@ export function HabitSetupFlow({
               label="Valider l'habitude"
               variant="primary"
               onPress={() => void confirmCreate()}
-              disabled={disabled}
+              disabled={flowDisabled}
             />
             <Button
               label="Retour"
               variant="ghost"
               onPress={() => setStep('intention')}
-              disabled={disabled}
+              disabled={flowDisabled}
             />
           </View>
         </View>

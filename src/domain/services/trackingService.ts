@@ -41,7 +41,7 @@ export async function logGoalNumeric(
   const goals = (await goalRepo.listGoals(db)).filter((g) => g.status === 'active');
   const goal = goals.find((g) => g.id === goalId);
   if (!goal) throw new Error('Objectif introuvable');
-  const version = await goalRepo.getCurrentVersion(db, goalId);
+  const version = await goalRepo.getVersionForDate(db, goalId, localDate);
   const status = statusFromLog(goal, version, value);
   return confirmGoalDay(db, goalId, localDate, status, value, note);
 }
@@ -77,7 +77,7 @@ export async function confirmGoalDay(
     const goal = goals.find((g) => g.id === goalId);
     if (!goal) throw new Error('Objectif introuvable');
 
-    const version = await goalRepo.getCurrentVersion(tx, goalId);
+    const version = await goalRepo.getVersionForDate(tx, goalId, localDate);
     const prior = await goalRepo.getTracking(tx, goalId, localDate);
     const eventId = prior?.id ?? createId('trk');
     const ts = nowIso();

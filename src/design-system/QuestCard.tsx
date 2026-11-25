@@ -27,6 +27,7 @@ export function QuestCard({
   title,
   category,
   status,
+  statusLabel,
   targetLabel,
   valueLabel,
   progress,
@@ -36,6 +37,7 @@ export function QuestCard({
   title: string;
   category?: GoalTemplate['category'];
   status: TrackingStatus;
+  statusLabel?: string;
   targetLabel?: string;
   valueLabel?: string;
   progress?: number;
@@ -43,6 +45,7 @@ export function QuestCard({
   children?: React.ReactNode;
 }) {
   const statusColor = STATUS_COLORS[status] ?? colors.muted;
+  const badgeText = statusLabel ?? STATUS_LABELS[status];
 
   const content = (
     <>
@@ -57,7 +60,7 @@ export function QuestCard({
           {targetLabel ? <Text style={styles.meta}>{targetLabel}</Text> : null}
         </View>
         <View style={[styles.badge, { borderColor: statusColor }]}>
-          <Text style={[styles.badgeText, { color: statusColor }]}>{STATUS_LABELS[status]}</Text>
+          <Text style={[styles.badgeText, { color: statusColor }]}>{badgeText}</Text>
         </View>
       </View>
       {valueLabel ? <Text style={styles.value}>Aujourd'hui : {valueLabel}</Text> : null}

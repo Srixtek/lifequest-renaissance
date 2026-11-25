@@ -38,6 +38,7 @@ function makeDb() {
 function defaultMocks() {
   (goalRepo.listGoals as jest.Mock).mockResolvedValue([baseGoal]);
   (goalRepo.getCurrentVersion as jest.Mock).mockResolvedValue(null);
+  (goalRepo.getVersionForDate as jest.Mock).mockResolvedValue(null);
   (goalRepo.getTracking as jest.Mock).mockResolvedValue(null);
   (goalRepo.upsertTracking as jest.Mock).mockResolvedValue(undefined);
   (dailyRewardRepo.detectAndMarkLegacyDay as jest.Mock).mockResolvedValue(false);

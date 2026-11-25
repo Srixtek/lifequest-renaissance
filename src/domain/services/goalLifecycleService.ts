@@ -1,12 +1,15 @@
 import type { Db } from '../../data/db/client';
+import type { SqlRunner } from '../../data/db/sqlRunner';
 import * as goalRepo from '../../data/db/repositories/goalRepo';
 import type { GoalDefinition, GoalTier, GoalVersion } from '../models/types';
 import type { ResolvedHabitPlan } from '../content/habitIntentions';
 import { addDays, nowIso } from '../rules/dates';
 import { createId } from '../../utils/id';
 
+type Conn = Db | SqlRunner;
+
 export async function createHabitGoal(
-  db: Db,
+  db: Conn,
   plan: ResolvedHabitPlan,
   targetValue: number | null,
   tier: GoalTier,
@@ -50,8 +53,11 @@ export async function archiveAndRecreateForModeChange(
   targetValue: number | null,
   tier: GoalTier,
 ): Promise<{ newGoalId: string }> {
-  await goalRepo.setGoalStatus(db, existing.id, 'archived');
-  const newGoalId = await createHabitGoal(db, plan, targetValue, tier);
+  let newGoalId = '';
+  await db.withExclusiveTransactionAsync(async (tx) => {
+    await goalRepo.setGoalStatus(tx, existing.id, 'archived');
+    newGoalId = await createHabitGoal(tx, plan, targetValue, tier);
+  });
   return { newGoalId };
 }
 
@@ -66,24 +72,45 @@ export async function scheduleVersionUpdate(
   todayLocal: string,
   patch: VersionPatch,
 ): Promise<{ effectiveFrom: string }> {
-  const current = await goalRepo.getCurrentVersion(db, goalId);
-  if (!current) throw new Error('Version active introuvable');
   const effectiveFrom = addDays(todayLocal, 1);
-  await goalRepo.closeVersion(db, current.id, todayLocal);
-  const nextVersion = current.version + 1;
-  const version: GoalVersion = {
-    id: createId('gver'),
-    goalId,
-    version: nextVersion,
-    tier: current.tier,
-    targetValue: patch.targetValue !== undefined ? patch.targetValue : current.targetValue,
-    scheduleKind: current.scheduleKind,
-    weeklyTargetCount:
-      patch.weeklyTargetCount !== undefined ? patch.weeklyTargetCount : current.weeklyTargetCount,
-    notes: null,
-    effectiveFrom,
-    effectiveTo: null,
-  };
-  await goalRepo.insertGoalVersion(db, version);
+
+  await db.withExclusiveTransactionAsync(async (tx) => {
+    const applyingToday = await goalRepo.getVersionForDate(tx, goalId, todayLocal);
+    if (!applyingToday) throw new Error('Version active introuvable');
+
+    const open = await goalRepo.getCurrentVersion(tx, goalId);
+
+    // Second (or later) change the same local day: adjust the already-scheduled future version.
+    if (open && open.effectiveFrom > todayLocal) {
+      await goalRepo.patchGoalVersion(tx, open.id, patch);
+      return;
+    }
+
+    if (open && open.effectiveTo == null && open.effectiveFrom <= todayLocal) {
+      await goalRepo.closeVersion(tx, open.id, todayLocal);
+    }
+
+    const targetValue =
+      patch.targetValue !== undefined ? patch.targetValue : applyingToday.targetValue;
+    const weeklyTargetCount =
+      patch.weeklyTargetCount !== undefined
+        ? patch.weeklyTargetCount
+        : applyingToday.weeklyTargetCount;
+
+    const version: GoalVersion = {
+      id: createId('gver'),
+      goalId,
+      version: applyingToday.version + 1,
+      tier: applyingToday.tier,
+      targetValue,
+      scheduleKind: applyingToday.scheduleKind,
+      weeklyTargetCount,
+      notes: null,
+      effectiveFrom,
+      effectiveTo: null,
+    };
+    await goalRepo.insertGoalVersion(tx, version);
+  });
+
   return { effectiveFrom };
 }
