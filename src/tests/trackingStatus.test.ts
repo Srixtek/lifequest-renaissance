@@ -77,9 +77,12 @@ describe('mission templates kinds', () => {
     );
   });
 
-  test('measure mode (followWithoutXp) stays neutral', () => {
+  test('measure mode (followWithoutXp) stays neutral but explicit', () => {
     expect(
       statusFromLog({ kind: 'limit', followWithoutXp: true }, { targetValue: 5 } as any, 99),
+    ).toBe('partial');
+    expect(
+      statusFromLog({ kind: 'quantity', followWithoutXp: true }, { targetValue: null } as any, 0),
     ).toBe('partial');
   });
 });

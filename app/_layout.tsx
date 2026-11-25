@@ -69,6 +69,15 @@ export default function RootLayout() {
           }}
         />
         <Stack.Screen
+          name="tools/challenges"
+          options={{
+            headerShown: true,
+            title: 'Défis chronométrés',
+            headerStyle: { backgroundColor: colors.bgElevated },
+            headerTintColor: colors.ink,
+          }}
+        />
+        <Stack.Screen
           name="journal/index"
           options={{
             headerShown: true,

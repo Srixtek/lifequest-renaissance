@@ -2,6 +2,7 @@ import * as SQLite from 'expo-sqlite';
 import migration001 from './migrations/001_initial';
 import migration002 from './migrations/002_content_seed';
 import migration003 from './migrations/003_daily_rewards';
+import migration004 from './migrations/004_challenge_sessions';
 
 export type Db = SQLite.SQLiteDatabase;
 
@@ -9,6 +10,7 @@ const MIGRATIONS: Array<{ version: number; sql: string }> = [
   { version: 1, sql: migration001 },
   { version: 2, sql: migration002 },
   { version: 3, sql: migration003 },
+  { version: 4, sql: migration004 },
 ];
 
 let dbPromise: Promise<Db> | null = null;

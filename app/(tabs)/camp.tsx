@@ -15,10 +15,18 @@ import { useAppStore } from '@/src/state/appStore';
 import { getDb } from '@/src/data/db/client';
 import { upgradeCamp } from '@/src/domain/services/adventureService';
 import { XP_PER_LEVEL } from '@/src/domain/rules/xp';
-import type { TrackingStatus } from '@/src/domain/models/types';
+import type { GoalDefinition, TrackingStatus } from '@/src/domain/models/types';
 import { useState } from 'react';
 
-function todayStatusLabel(status: TrackingStatus): string {
+function todayStatusLabel(
+  goal: GoalDefinition,
+  status: TrackingStatus,
+  hasValue: boolean,
+): string {
+  if (goal.followWithoutXp) {
+    if (status === 'unknown' && !hasValue) return 'Non renseigné';
+    if (hasValue || status !== 'unknown') return 'Renseigné';
+  }
   if (status === 'success') return 'Accompli';
   if (status === 'partial') return 'Partiel';
   if (status === 'miss') return 'Écart';
@@ -119,7 +127,7 @@ export default function CampScreen() {
                     category={category}
                     status={status}
                     targetLabel={g.title}
-                    valueLabel={todayStatusLabel(status)}
+                    valueLabel={todayStatusLabel(g, status, tr?.value != null)}
                   />
                 </Pressable>
               );
@@ -132,6 +140,7 @@ export default function CampScreen() {
           <Button label="Renseigner une habitude" onPress={() => router.push('/(tabs)/goals')} />
           <Button label="Respiration" variant="secondary" onPress={() => router.push('/tools/breathing')} />
           <Button label="Gérer une envie" variant="secondary" onPress={() => router.push('/tools/urge')} />
+          <Button label="Défis chronométrés" variant="secondary" onPress={() => router.push('/tools/challenges')} />
           <Button label="Journal" variant="ghost" onPress={() => router.push('/journal')} />
         </View>
 

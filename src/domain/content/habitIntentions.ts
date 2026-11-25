@@ -147,11 +147,20 @@ export function resolveHabitPlan(
     };
   }
 
+  if (measureMode) {
+    return {
+      ...base,
+      title: `${catLabel} — suivi`,
+      kind: 'quantity',
+      defaultTarget: null,
+    };
+  }
+
   const defaultTarget = targetValue ?? DEFAULT_TARGETS[category] ?? 1;
   const kind: GoalKind = category === 'C' ? 'reduce' : 'limit';
   return {
     ...base,
-    title: measureMode ? `${catLabel} — suivi` : `${catLabel} — maximum quotidien`,
+    title: `${catLabel} — maximum quotidien`,
     kind,
     defaultTarget,
   };
@@ -161,7 +170,7 @@ export function intentionRequiresNumericTarget(
   category: HabitCategory,
   intention: HabitIntentionChoice,
 ): boolean {
-  if (intention === 'stop' || intention === 'weekly_calls') return false;
+  if (intention === 'stop' || intention === 'weekly_calls' || intention === 'measure') return false;
   return true;
 }
 

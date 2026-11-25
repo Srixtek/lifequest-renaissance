@@ -28,11 +28,12 @@ describe('resolveHabitPlan — vape x3', () => {
     expect(p.followWithoutXp).toBe(false);
   });
 
-  test('measure uses limit without XP', () => {
+  test('measure uses quantity without XP and no default target', () => {
     const p = resolveHabitPlan('A', 'measure', 4, null);
-    expect(p.kind).toBe('limit');
+    expect(p.kind).toBe('quantity');
     expect(p.followWithoutXp).toBe(true);
     expect(p.measureMode).toBe(true);
+    expect(p.defaultTarget).toBeNull();
   });
 });
 
@@ -41,11 +42,12 @@ describe('resolveHabitPlan — alcohol & regulation', () => {
     expect(resolveHabitPlan('B', 'reduce', 2, null).kind).toBe('limit');
   });
 
-  test('regulation measure is neutral reduce without XP', () => {
+  test('regulation measure is neutral quantity without XP', () => {
     const p = resolveHabitPlan('C', 'measure', 1, null);
-    expect(p.kind).toBe('reduce');
+    expect(p.kind).toBe('quantity');
     expect(p.followWithoutXp).toBe(true);
     expect(p.sensitive).toBe(true);
+    expect(p.defaultTarget).toBeNull();
   });
 });
 
