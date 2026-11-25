@@ -2,7 +2,9 @@ import type { Db } from '../client';
 import type { SqlRunner } from '../sqlRunner';
 import type { GoalDefinition, GoalVersion, TrackingEvent, TrackingStatus } from '../../../domain/models/types';
 
-export async function listGoals(db: Db, includeArchived = false): Promise<GoalDefinition[]> {
+type Conn = Db | SqlRunner;
+
+export async function listGoals(db: Conn, includeArchived = false): Promise<GoalDefinition[]> {
   const sql = includeArchived
     ? 'SELECT * FROM goal_definitions ORDER BY created_at'
     : `SELECT * FROM goal_definitions WHERE status != 'archived' ORDER BY created_at`;
@@ -70,7 +72,7 @@ export async function setGoalStatus(
   await db.runAsync('UPDATE goal_definitions SET status = ? WHERE id = ?', status, goalId);
 }
 
-export async function getCurrentVersion(db: Db, goalId: string): Promise<GoalVersion | null> {
+export async function getCurrentVersion(db: Conn, goalId: string): Promise<GoalVersion | null> {
   const r = await db.getFirstAsync<any>(
     `SELECT * FROM goal_versions WHERE goal_id = ? AND effective_to IS NULL ORDER BY version DESC LIMIT 1`,
     goalId,
@@ -89,8 +91,6 @@ export async function getCurrentVersion(db: Db, goalId: string): Promise<GoalVer
     effectiveTo: r.effective_to,
   };
 }
-
-type Conn = Db | SqlRunner;
 
 export async function upsertTracking(
   db: Conn,
@@ -116,7 +116,7 @@ export async function upsertTracking(
 }
 
 export async function getTracking(
-  db: Db,
+  db: Conn,
   goalId: string,
   localDate: string,
 ): Promise<TrackingEvent | null> {

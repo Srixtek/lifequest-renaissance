@@ -112,7 +112,13 @@ export default function GoalsScreen() {
       const db = await getDb();
       const r = await confirmGoalDay(db, goalId, today, status, value);
       if (status === 'unknown') {
-        showFeedback('Statut : non renseigné (0 XP, aucun éclat).');
+        if (r.xpDeltaCenti < 0) {
+          showFeedback(`XP ajustée : -${Math.abs(r.xpGranted)}.`);
+        } else if (r.rewardUnchanged) {
+          showFeedback('Statut : non renseigné (récompense inchangée).');
+        } else {
+          showFeedback('Statut : non renseigné (0 XP, aucun éclat).');
+        }
       } else if (r.legacyDay) {
         showFeedback(
           r.rewardUnchanged

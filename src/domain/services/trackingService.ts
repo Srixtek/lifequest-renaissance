@@ -1,9 +1,10 @@
 import type { Db } from '../../data/db/client';
+import type { SqlRunner } from '../../data/db/sqlRunner';
 import * as goalRepo from '../../data/db/repositories/goalRepo';
 import * as xpRepo from '../../data/db/repositories/xpRepo';
 import * as rpgRepo from '../../data/db/repositories/rpgRepo';
 import * as dailyRewardRepo from '../../data/db/repositories/dailyRewardRepo';
-import type { TrackingStatus } from '../models/types';
+import type { GoalDefinition, TrackingStatus } from '../models/types';
 import {
   XP_RULE_VERSION,
   centiToXp,
@@ -47,7 +48,7 @@ export async function logGoalNumeric(
 
 /**
  * Honest confirmation for a goal on a localDate.
- * Never invents success. Unknown days grant 0 XP.
+ * Unknown / paused never create a snapshot; they may reverse prior credited XP.
  */
 export async function confirmGoalDay(
   db: Db,
@@ -57,15 +58,6 @@ export async function confirmGoalDay(
   value: number | null = null,
   note: string | null = null,
 ): Promise<ConfirmResult> {
-  const goals = (await goalRepo.listGoals(db)).filter((g) => g.status === 'active');
-  const goal = goals.find((g) => g.id === goalId);
-  if (!goal) throw new Error('Objectif introuvable');
-
-  const version = await goalRepo.getCurrentVersion(db, goalId);
-  const prior = await goalRepo.getTracking(db, goalId, localDate);
-  const eventId = prior?.id ?? createId('trk');
-  const ts = nowIso();
-
   const base: ConfirmResult = {
     xpGranted: 0,
     xpDeltaCenti: 0,
@@ -81,6 +73,15 @@ export async function confirmGoalDay(
   const out = { ...base };
 
   await db.withExclusiveTransactionAsync(async (tx) => {
+    const goals = (await goalRepo.listGoals(tx)).filter((g) => g.status === 'active');
+    const goal = goals.find((g) => g.id === goalId);
+    if (!goal) throw new Error('Objectif introuvable');
+
+    const version = await goalRepo.getCurrentVersion(tx, goalId);
+    const prior = await goalRepo.getTracking(tx, goalId, localDate);
+    const eventId = prior?.id ?? createId('trk');
+    const ts = nowIso();
+
     await goalRepo.upsertTracking(tx, {
       id: eventId,
       goalId,
@@ -92,13 +93,33 @@ export async function confirmGoalDay(
       updatedAt: ts,
     });
 
-    if (!isExplicitTrackingStatus(status)) {
-      return;
-    }
-
     const legacy = await dailyRewardRepo.detectAndMarkLegacyDay(tx, localDate);
     if (legacy) {
       out.legacyDay = true;
+      return;
+    }
+
+    const explicit = isExplicitTrackingStatus(status);
+
+    if (!explicit) {
+      if (goal.followWithoutXp) return;
+      const goalRow = await dailyRewardRepo.getGoalRow(tx, localDate, goalId);
+      if (!goalRow) return;
+      const deltaCenti = 0 - goalRow.creditedCenti;
+      if (deltaCenti === 0) {
+        out.rewardUnchanged = true;
+        return;
+      }
+      await applyGoalXpDelta(tx, {
+        goal,
+        status,
+        eventId,
+        localDate,
+        goalRow,
+        expectedCenti: 0,
+        deltaCenti,
+        out,
+      });
       return;
     }
 
@@ -111,9 +132,7 @@ export async function confirmGoalDay(
     const shardOk = await rpgRepo.addShards(tx, 1, `Participation ${localDate}`, checkinKey);
     if (shardOk) out.shardsGranted = 1;
 
-    if (goal.followWithoutXp) {
-      return;
-    }
+    if (goal.followWithoutXp) return;
 
     const goalRow = await dailyRewardRepo.getGoalRow(tx, localDate, goalId);
     if (!goalRow) {
@@ -130,32 +149,58 @@ export async function confirmGoalDay(
       return;
     }
 
-    const newRevision = goalRow.revision + 1;
-    const idemKey = idempotencyKeyDailyGoalRevision(goalId, localDate, newRevision);
-    const insertResult = await xpRepo.insertXp(tx, {
-      id: createId('xp'),
-      sourceEventId: eventId,
-      sourceRuleVersion: XP_RULE_VERSION,
-      xpAmount: centiToXp(deltaCenti),
-      reason:
-        deltaCenti > 0
-          ? `Objectif « ${goal.title} » (${status})`
-          : `Ajustement XP « ${goal.title} » (${status})`,
-      idempotencyKey: idemKey,
+    await applyGoalXpDelta(tx, {
+      goal,
+      status,
+      eventId,
       localDate,
-      createdAt: nowIso(),
+      goalRow,
+      expectedCenti,
+      deltaCenti,
+      out,
     });
-
-    if (insertResult === 'duplicate') {
-      out.duplicate = true;
-      return;
-    }
-
-    await dailyRewardRepo.applyCreditedCenti(tx, localDate, goalId, expectedCenti, newRevision);
-    await xpRepo.refreshCharacterFromLedger(tx);
-    out.xpDeltaCenti = deltaCenti;
-    out.xpGranted = centiToXp(deltaCenti);
   });
 
   return out;
+}
+
+async function applyGoalXpDelta(
+  tx: SqlRunner,
+  ctx: {
+    goal: GoalDefinition;
+    status: TrackingStatus;
+    eventId: string;
+    localDate: string;
+    goalRow: dailyRewardRepo.DailyRewardGoalRow;
+    expectedCenti: number;
+    deltaCenti: number;
+    out: ConfirmResult;
+  },
+): Promise<void> {
+  const { goal, status, eventId, localDate, goalRow, expectedCenti, deltaCenti, out } = ctx;
+  const newRevision = goalRow.revision + 1;
+  const idemKey = idempotencyKeyDailyGoalRevision(goal.id, localDate, newRevision);
+  const insertResult = await xpRepo.insertXp(tx, {
+    id: createId('xp'),
+    sourceEventId: eventId,
+    sourceRuleVersion: XP_RULE_VERSION,
+    xpAmount: centiToXp(deltaCenti),
+    reason:
+      deltaCenti > 0
+        ? `Objectif « ${goal.title} » (${status})`
+        : `Ajustement XP « ${goal.title} » (${status})`,
+    idempotencyKey: idemKey,
+    localDate,
+    createdAt: nowIso(),
+  });
+
+  if (insertResult === 'duplicate') {
+    out.duplicate = true;
+    return;
+  }
+
+  await dailyRewardRepo.applyCreditedCenti(tx, localDate, goal.id, expectedCenti, newRevision);
+  await xpRepo.refreshCharacterFromLedger(tx);
+  out.xpDeltaCenti = deltaCenti;
+  out.xpGranted = centiToXp(deltaCenti);
 }
