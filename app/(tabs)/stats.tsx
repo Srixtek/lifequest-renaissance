@@ -50,13 +50,28 @@ export default function StatsScreen() {
           <View key={s.goalId} style={styles.card}>
             <Text style={styles.goalTitle}>{s.title}</Text>
             <Body muted>{coverageLabel(s)}</Body>
-            <Body muted>
-              Succès déclarés : {s.successCount}/{s.window}
-            </Body>
+            {s.followWithoutXp ? (
+              <Body muted>
+                Mode Mesurer — jours renseignés : {s.covered}/{s.window}
+                {s.points.some((p) => p.value != null)
+                  ? ` · valeurs : ${s.points
+                      .filter((p) => p.status !== 'unknown' && p.value != null)
+                      .map((p) => `${p.date.slice(5)}=${p.value}`)
+                      .join(', ')}`
+                  : ''}
+              </Body>
+            ) : (
+              <Body muted>
+                Succès déclarés : {s.successCount}/{s.window}
+              </Body>
+            )}
             <Svg width="100%" height={56} viewBox={`0 0 ${s.points.length * 12} 56`}>
               {s.points.map((p, i) => {
-                const color =
-                  p.status === 'success'
+                const color = s.followWithoutXp
+                  ? p.status === 'unknown'
+                    ? colors.line
+                    : colors.muted
+                  : p.status === 'success'
                     ? colors.success
                     : p.status === 'partial'
                       ? colors.warn

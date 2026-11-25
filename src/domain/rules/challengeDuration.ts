@@ -35,7 +35,9 @@ export function parsePositiveTargetMinutes(raw: string, maxMinutes = MAX_CHALLEN
   const n = Number(trimmed.replace(',', '.'));
   if (!Number.isFinite(n) || n <= 0) return { ok: false, error: 'Durée invalide' };
   if (n > maxMinutes) return { ok: false, error: `Durée max ${maxMinutes} min` };
-  return { ok: true, minutes: Math.floor(n) };
+  const targetSec = Math.round(n * 60);
+  if (targetSec < 1) return { ok: false, error: 'Durée invalide' };
+  return { ok: true, minutes: targetSec / 60 };
 }
 
 /** Sport confirmation: 0 allowed, finite, capped. */
