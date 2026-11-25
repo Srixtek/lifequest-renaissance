@@ -22,6 +22,7 @@ const TABLES = [
   'backup_metadata',
   'daily_reward_days',
   'daily_reward_goals',
+  'challenge_sessions',
 ] as const;
 
 export interface BackupPreview {
@@ -108,6 +109,7 @@ export async function importBackup(db: Db, uri: string): Promise<BackupPreview> 
 
   await db.withTransactionAsync(async () => {
     const wipe = [
+      'challenge_sessions',
       'daily_reward_goals',
       'daily_reward_days',
       'tracking_events',

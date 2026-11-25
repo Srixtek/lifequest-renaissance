@@ -65,7 +65,9 @@ export function HabitSetupFlow({
       intentionRequiresWeeklyCount(intention) ? Number(weeklyDraft) : null,
     );
     let targetValue: number | null = plan.defaultTarget;
-    if (intentionRequiresNumericTarget(category, intention)) {
+    if (intention === 'measure') {
+      targetValue = null;
+    } else if (intentionRequiresNumericTarget(category, intention)) {
       const check = validateCreationTarget(plan.kind, targetDraft || String(plan.defaultTarget ?? ''));
       if (!check.ok) {
         onFeedback(check.error);

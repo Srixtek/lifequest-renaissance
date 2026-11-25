@@ -26,5 +26,6 @@ describe('backup v0.2 tables', () => {
     const calls = (db.getAllAsync as jest.Mock).mock.calls.map((c) => c[0]);
     expect(calls.some((s: string) => s.includes('daily_reward_days'))).toBe(true);
     expect(calls.some((s: string) => s.includes('daily_reward_goals'))).toBe(true);
+    expect(calls.some((s: string) => s.includes('challenge_sessions'))).toBe(true);
   });
 });

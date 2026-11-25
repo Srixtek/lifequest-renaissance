@@ -33,6 +33,8 @@ import {
   validateCreationTarget,
 } from '@/src/domain/rules/trackingStatus';
 import { HELP_LINES, HEALTH_GUARDRAIL } from '@/src/data/content/helpLines';
+import { useRouter } from 'expo-router';
+import { challengeTypeForTemplate } from '@/src/domain/models/challengeSession';
 
 const STATUS_FR: Record<TrackingStatus, string> = {
   unknown: 'Non renseigné',
@@ -53,6 +55,7 @@ function displayStatus(goal: GoalDefinition, status: TrackingStatus, hasValue: b
 }
 
 export default function GoalsScreen() {
+  const router = useRouter();
   const goals = useAppStore((s) => s.goals);
   const today = useAppStore((s) => s.today);
   const todayTracking = useAppStore((s) => s.todayTracking);
@@ -373,9 +376,13 @@ export default function GoalsScreen() {
                     ? 'Suivi neutre'
                     : 'Confirmation quotidienne';
           const progress =
-            !g.followWithoutXp && ver?.target != null && tr?.value != null
+            !g.followWithoutXp &&
+            ver?.target != null &&
+            tr?.value != null &&
+            rawStatus !== 'unknown'
               ? completionRatio(status, g.kind, tr.value, ver.target)
               : undefined;
+          const challengeType = challengeTypeForTemplate(g.templateId);
 
           return (
             <QuestCard
@@ -388,6 +395,15 @@ export default function GoalsScreen() {
               valueLabel={savedValue}
               progress={progress}
             >
+
+              {challengeType ? (
+                <Button
+                  label="Ouvrir le défi chronométré"
+                  variant="secondary"
+                  onPress={() => router.push(`/tools/challenges?type=${challengeType}`)}
+                  disabled={actionBusy}
+                />
+              ) : null}
 
               {tpl?.neutralNote ? (
                 <View style={styles.note}>

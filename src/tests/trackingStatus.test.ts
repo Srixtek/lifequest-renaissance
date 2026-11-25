@@ -80,6 +80,6 @@ describe('mission templates kinds', () => {
   test('measure mode (followWithoutXp) stays neutral', () => {
     expect(
       statusFromLog({ kind: 'limit', followWithoutXp: true }, { targetValue: 5 } as any, 99),
-    ).toBe('partial');
+    ).toBe('unknown');
   });
 });

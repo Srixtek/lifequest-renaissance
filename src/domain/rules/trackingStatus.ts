@@ -112,7 +112,7 @@ export function statusFromLog(
   value: number,
 ): TrackingStatus {
   if (goal.followWithoutXp) {
-    return 'partial';
+    return 'unknown';
   }
   const target = targetOrNull(version);
   return deriveTrackingStatus(goal.kind, value, target);
