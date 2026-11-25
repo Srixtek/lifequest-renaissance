@@ -1,7 +1,10 @@
+import type { SqlRunner } from '../sqlRunner';
 import type { Db } from '../client';
 import type { CharacterProgress, EquipmentSlot, InventoryItem } from '../../../domain/models/types';
 
-export async function getCharacter(db: Db): Promise<CharacterProgress> {
+type Conn = Db | SqlRunner;
+
+export async function getCharacter(db: Conn): Promise<CharacterProgress> {
   const r = await db.getFirstAsync<any>('SELECT * FROM character_progress WHERE id = 1');
   return {
     level: r.level,
@@ -12,7 +15,7 @@ export async function getCharacter(db: Db): Promise<CharacterProgress> {
   };
 }
 
-export async function addShards(db: Db, amount: number, reason: string, idempotencyKey: string): Promise<boolean> {
+export async function addShards(db: Conn, amount: number, reason: string, idempotencyKey: string): Promise<boolean> {
   try {
     await db.runAsync(
       `INSERT INTO wallet_ledger (id, resource, amount, reason, idempotency_key, created_at)
@@ -25,8 +28,8 @@ export async function addShards(db: Db, amount: number, reason: string, idempote
     );
     await db.runAsync('UPDATE character_progress SET shards = shards + ? WHERE id = 1', amount);
     return true;
-  } catch (err: any) {
-    if (String(err?.message ?? err).toLowerCase().includes('unique')) return false;
+  } catch (err: unknown) {
+    if (String((err as Error)?.message ?? err).toLowerCase().includes('unique')) return false;
     throw err;
   }
 }

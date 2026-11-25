@@ -20,6 +20,8 @@ const TABLES = [
   'settings',
   'schema_migrations',
   'backup_metadata',
+  'daily_reward_days',
+  'daily_reward_goals',
 ] as const;
 
 export interface BackupPreview {
@@ -106,6 +108,8 @@ export async function importBackup(db: Db, uri: string): Promise<BackupPreview> 
 
   await db.withTransactionAsync(async () => {
     const wipe = [
+      'daily_reward_goals',
+      'daily_reward_days',
       'tracking_events',
       'goal_versions',
       'goal_definitions',

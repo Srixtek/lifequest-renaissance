@@ -1,4 +1,5 @@
 import type { Db } from '../client';
+import type { SqlRunner } from '../sqlRunner';
 import type { GoalDefinition, GoalVersion, TrackingEvent, TrackingStatus } from '../../../domain/models/types';
 
 export async function listGoals(db: Db, includeArchived = false): Promise<GoalDefinition[]> {
@@ -89,8 +90,10 @@ export async function getCurrentVersion(db: Db, goalId: string): Promise<GoalVer
   };
 }
 
+type Conn = Db | SqlRunner;
+
 export async function upsertTracking(
-  db: Db,
+  db: Conn,
   event: TrackingEvent,
 ): Promise<void> {
   await db.runAsync(

@@ -1,8 +1,11 @@
 import {
   DAILY_XP_BUDGET,
+  DAILY_XP_BUDGET_CENTI,
+  allocateXpCenti,
   completionRatio,
   earnedXp,
   idempotencyKeyDailyGoal,
+  idempotencyKeyDailyGoalRevision,
   levelFromTotalXp,
   potentialXpForGoals,
 } from '../domain/rules/xp';
@@ -59,5 +62,24 @@ describe('XP rules', () => {
 
   test('idempotency key stable', () => {
     expect(idempotencyKeyDailyGoal('g1', '2026-11-10')).toBe('daily-goal:g1:2026-11-10');
+  });
+
+  test('centi allocation sums to budget', () => {
+    const centi = allocateXpCenti([
+      { id: 'a', weight: 1, followWithoutXp: false },
+      { id: 'b', weight: 1, followWithoutXp: false },
+    ]);
+    expect(Object.values(centi).reduce((a, b) => a + b, 0)).toBe(DAILY_XP_BUDGET_CENTI);
+  });
+
+  test('revision idempotency key', () => {
+    expect(idempotencyKeyDailyGoalRevision('g1', '2026-11-10', 3)).toBe(
+      'daily-goal-v3:g1:2026-11-10:r3',
+    );
+  });
+
+  test('zero target partial ratio', () => {
+    expect(completionRatio('partial', 'quantity', 0, 0)).toBe(1);
+    expect(completionRatio('partial', 'quantity', 1, 0)).toBe(0);
   });
 });

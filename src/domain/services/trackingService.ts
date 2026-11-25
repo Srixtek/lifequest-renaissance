@@ -2,14 +2,16 @@ import type { Db } from '../../data/db/client';
 import * as goalRepo from '../../data/db/repositories/goalRepo';
 import * as xpRepo from '../../data/db/repositories/xpRepo';
 import * as rpgRepo from '../../data/db/repositories/rpgRepo';
+import * as dailyRewardRepo from '../../data/db/repositories/dailyRewardRepo';
 import type { TrackingStatus } from '../models/types';
 import {
   XP_RULE_VERSION,
+  centiToXp,
   completionRatio,
-  earnedXp,
-  idempotencyKeyDailyGoal,
-  potentialXpForGoals,
-  shardsFromXpGrant,
+  earnedXpCenti,
+  idempotencyKeyDailyCheckin,
+  idempotencyKeyDailyGoalRevision,
+  isExplicitTrackingStatus,
 } from '../rules/xp';
 import { nowIso } from '../rules/dates';
 import { createId } from '../../utils/id';
@@ -17,10 +19,14 @@ import { statusFromLog } from '../rules/trackingStatus';
 
 export interface ConfirmResult {
   xpGranted: number;
+  xpDeltaCenti: number;
   shardsGranted: number;
+  rewardUnchanged: boolean;
   duplicate: boolean;
   status: TrackingStatus;
   value: number | null;
+  addedAfterSnapshot: boolean;
+  legacyDay: boolean;
 }
 
 /** Save a numeric daily log and derive status. Empty input must not call this. */
@@ -59,56 +65,97 @@ export async function confirmGoalDay(
   const prior = await goalRepo.getTracking(db, goalId, localDate);
   const eventId = prior?.id ?? createId('trk');
   const ts = nowIso();
-  await goalRepo.upsertTracking(db, {
-    id: eventId,
-    goalId,
-    localDate,
+
+  const base: ConfirmResult = {
+    xpGranted: 0,
+    xpDeltaCenti: 0,
+    shardsGranted: 0,
+    rewardUnchanged: false,
+    duplicate: false,
     status,
     value,
-    note,
-    createdAt: prior?.createdAt ?? ts,
-    updatedAt: ts,
-  });
+    addedAfterSnapshot: false,
+    legacyDay: false,
+  };
 
-  if (status === 'unknown' || status === 'paused' || goal.followWithoutXp) {
-    return { xpGranted: 0, shardsGranted: 0, duplicate: false, status, value };
-  }
+  const out = { ...base };
 
-  const potentials = potentialXpForGoals(goals);
-  const ratio = completionRatio(status, goal.kind, value, version?.targetValue ?? null);
-  const xp = earnedXp(potentials[goalId] ?? 0, ratio);
-  if (xp <= 0) {
-    return { xpGranted: 0, shardsGranted: 0, duplicate: false, status, value };
-  }
+  await db.withExclusiveTransactionAsync(async (tx) => {
+    await goalRepo.upsertTracking(tx, {
+      id: eventId,
+      goalId,
+      localDate,
+      status,
+      value,
+      note,
+      createdAt: prior?.createdAt ?? ts,
+      updatedAt: ts,
+    });
 
-  const key = idempotencyKeyDailyGoal(goalId, localDate);
-  let duplicate = false;
-  let shards = 0;
-  await db.withTransactionAsync(async () => {
-    const result = await xpRepo.insertXp(db, {
+    if (!isExplicitTrackingStatus(status)) {
+      return;
+    }
+
+    const legacy = await dailyRewardRepo.detectAndMarkLegacyDay(tx, localDate);
+    if (legacy) {
+      out.legacyDay = true;
+      return;
+    }
+
+    const hadSnapshotBefore = !!(await dailyRewardRepo.getDay(tx, localDate));
+    if (!hadSnapshotBefore) {
+      await dailyRewardRepo.createSnapshot(tx, localDate, goals);
+    }
+
+    const checkinKey = idempotencyKeyDailyCheckin(localDate);
+    const shardOk = await rpgRepo.addShards(tx, 1, `Participation ${localDate}`, checkinKey);
+    if (shardOk) out.shardsGranted = 1;
+
+    if (goal.followWithoutXp) {
+      return;
+    }
+
+    const goalRow = await dailyRewardRepo.getGoalRow(tx, localDate, goalId);
+    if (!goalRow) {
+      out.addedAfterSnapshot = hadSnapshotBefore;
+      return;
+    }
+
+    const ratio = completionRatio(status, goal.kind, value, version?.targetValue ?? null);
+    const expectedCenti = earnedXpCenti(goalRow.potentialCenti, ratio);
+    const deltaCenti = expectedCenti - goalRow.creditedCenti;
+
+    if (deltaCenti === 0) {
+      out.rewardUnchanged = true;
+      return;
+    }
+
+    const newRevision = goalRow.revision + 1;
+    const idemKey = idempotencyKeyDailyGoalRevision(goalId, localDate, newRevision);
+    const insertResult = await xpRepo.insertXp(tx, {
       id: createId('xp'),
       sourceEventId: eventId,
       sourceRuleVersion: XP_RULE_VERSION,
-      xpAmount: xp,
-      reason: `Objectif « ${goal.title} » (${status})`,
-      idempotencyKey: key,
+      xpAmount: centiToXp(deltaCenti),
+      reason:
+        deltaCenti > 0
+          ? `Objectif « ${goal.title} » (${status})`
+          : `Ajustement XP « ${goal.title} » (${status})`,
+      idempotencyKey: idemKey,
       localDate,
       createdAt: nowIso(),
     });
-    if (result === 'duplicate') {
-      duplicate = true;
+
+    if (insertResult === 'duplicate') {
+      out.duplicate = true;
       return;
     }
-    await xpRepo.refreshCharacterFromLedger(db);
-    shards = shardsFromXpGrant(xp);
-    await rpgRepo.addShards(db, shards, `shards from ${goalId} ${localDate}`, `shards:${key}`);
+
+    await dailyRewardRepo.applyCreditedCenti(tx, localDate, goalId, expectedCenti, newRevision);
+    await xpRepo.refreshCharacterFromLedger(tx);
+    out.xpDeltaCenti = deltaCenti;
+    out.xpGranted = centiToXp(deltaCenti);
   });
 
-  return {
-    xpGranted: duplicate ? 0 : xp,
-    shardsGranted: duplicate ? 0 : shards,
-    duplicate,
-    status,
-    value,
-  };
+  return out;
 }

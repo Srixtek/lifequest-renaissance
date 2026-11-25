@@ -111,13 +111,33 @@ export default function GoalsScreen() {
     await runAction(async () => {
       const db = await getDb();
       const r = await confirmGoalDay(db, goalId, today, status, value);
-      showFeedback(
-        r.duplicate
-          ? 'XP déjà versée pour cet objectif aujourd\'hui (idempotence).'
-          : status === 'unknown'
-            ? 'Statut : non renseigné (0 XP).'
-            : `Enregistré · +${r.xpGranted} XP · +${r.shardsGranted} éclat(s)`,
-      );
+      if (status === 'unknown') {
+        showFeedback('Statut : non renseigné (0 XP, aucun éclat).');
+      } else if (r.legacyDay) {
+        showFeedback(
+          r.rewardUnchanged
+            ? 'Enregistré — journée historique, récompense inchangée.'
+            : 'Enregistré — journée historique (règles antérieures conservées).',
+        );
+      } else if (r.addedAfterSnapshot) {
+        showFeedback(
+          'Enregistré. Cet objectif comptera pour l\'XP à partir de demain (budget du jour déjà figé).',
+        );
+      } else if (r.duplicate) {
+        showFeedback('Enregistré — écriture déjà comptabilisée (idempotence).');
+      } else if (r.rewardUnchanged) {
+        const shard = r.shardsGranted ? ' · +1 éclat de participation' : '';
+        showFeedback(`Enregistré, récompense inchangée.${shard}`);
+      } else if (r.xpDeltaCenti < 0) {
+        const shard = r.shardsGranted ? ' · +1 éclat de participation' : '';
+        showFeedback(`XP ajustée : -${Math.abs(r.xpGranted)}.${shard}`);
+      } else if (r.xpGranted > 0) {
+        const shard = r.shardsGranted ? ' · +1 éclat de participation' : '';
+        showFeedback(`+${r.xpGranted} XP${shard}`);
+      } else {
+        const shard = r.shardsGranted ? ' · +1 éclat de participation' : '';
+        showFeedback(`Enregistré.${shard}`);
+      }
       await refresh();
     });
   };
@@ -132,11 +152,23 @@ export default function GoalsScreen() {
       }
       const db = await getDb();
       const r = await logGoalNumeric(db, goal.id, today, parsed.value);
-      showFeedback(
-        r.duplicate
-          ? `Valeur ${parsed.value} enregistrée · XP déjà versée aujourd'hui.`
-          : `Valeur ${parsed.value} enregistrée (${STATUS_FR[r.status]}) · +${r.xpGranted} XP`,
-      );
+      if (r.addedAfterSnapshot) {
+        showFeedback(
+          `${STATUS_FR[r.status]} — objectif hors budget du jour, XP dès demain.`,
+        );
+      } else if (r.rewardUnchanged) {
+        showFeedback(
+          `Valeur ${parsed.value} (${STATUS_FR[r.status]}) — enregistré, récompense inchangée.`,
+        );
+      } else if (r.xpDeltaCenti < 0) {
+        showFeedback(
+          `Valeur ${parsed.value} (${STATUS_FR[r.status]}) — XP ajustée : -${Math.abs(r.xpGranted)}.`,
+        );
+      } else if (r.xpGranted > 0) {
+        showFeedback(`Valeur ${parsed.value} (${STATUS_FR[r.status]}) · +${r.xpGranted} XP`);
+      } else {
+        showFeedback(`Valeur ${parsed.value} enregistrée (${STATUS_FR[r.status]}).`);
+      }
       await refresh();
     });
   };
