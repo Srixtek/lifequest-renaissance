@@ -1,70 +1,73 @@
 import { Tabs } from 'expo-router';
-import { Text, View } from 'react-native';
-import { colors } from '@/src/design-system/theme';
+import { Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import {
+  TabAdventureIcon,
+  TabGoalsIcon,
+  TabHeroIcon,
+  TabHomeIcon,
+  TabStatsIcon,
+} from '@/src/design-system/icons';
+import { colors, spacing } from '@/src/design-system/theme';
 
-function TabIcon({ focused, glyph }: { focused: boolean; glyph: string }) {
-  return (
-    <View
-      style={{
-        width: 28,
-        height: 28,
-        borderRadius: 8,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: focused ? colors.mist : 'transparent',
-        borderWidth: 1,
-        borderColor: focused ? colors.ember : colors.line,
-      }}
-    >
-      <Text style={{ color: focused ? colors.ember : colors.muted, fontSize: 12, fontWeight: '700' }}>{glyph}</Text>
-    </View>
-  );
-}
+const TAB_BASE_HEIGHT = 56;
 
 export default function TabsLayout() {
+  const insets = useSafeAreaInsets();
+  const bottomPad = Math.max(insets.bottom, Platform.OS === 'android' ? spacing.sm : 0);
+
   return (
     <Tabs
       screenOptions={{
         headerStyle: { backgroundColor: colors.bgElevated },
         headerTintColor: colors.ink,
-        tabBarStyle: { backgroundColor: colors.bgElevated, borderTopColor: colors.line, height: 64, paddingBottom: 8, paddingTop: 6 },
-        tabBarActiveTintColor: colors.ember,
+        headerShadowVisible: false,
+        tabBarStyle: {
+          backgroundColor: colors.bgElevated,
+          borderTopColor: colors.line,
+          height: TAB_BASE_HEIGHT + bottomPad,
+          paddingTop: spacing.xs,
+          paddingBottom: bottomPad,
+        },
+        tabBarActiveTintColor: colors.gold,
         tabBarInactiveTintColor: colors.muted,
+        tabBarLabelStyle: { fontSize: 11, fontWeight: '600', marginTop: 2 },
       }}
     >
       <Tabs.Screen
         name="camp"
         options={{
-          title: 'Camp',
-          tabBarIcon: ({ focused }) => <TabIcon focused={focused} glyph="C" />,
+          title: 'Accueil',
+          headerShown: false,
+          tabBarIcon: ({ focused }) => <TabHomeIcon focused={focused} />,
         }}
       />
       <Tabs.Screen
         name="goals"
         options={{
-          title: 'Objectifs',
-          tabBarIcon: ({ focused }) => <TabIcon focused={focused} glyph="O" />,
+          title: 'Habitudes',
+          tabBarIcon: ({ focused }) => <TabGoalsIcon focused={focused} />,
         }}
       />
       <Tabs.Screen
         name="adventure"
         options={{
           title: 'Aventure',
-          tabBarIcon: ({ focused }) => <TabIcon focused={focused} glyph="A" />,
+          tabBarIcon: ({ focused }) => <TabAdventureIcon focused={focused} />,
         }}
       />
       <Tabs.Screen
         name="character"
         options={{
           title: 'Héros',
-          tabBarIcon: ({ focused }) => <TabIcon focused={focused} glyph="H" />,
+          tabBarIcon: ({ focused }) => <TabHeroIcon focused={focused} />,
         }}
       />
       <Tabs.Screen
         name="stats"
         options={{
-          title: 'Stats',
-          tabBarIcon: ({ focused }) => <TabIcon focused={focused} glyph="S" />,
+          title: 'Bilan',
+          tabBarIcon: ({ focused }) => <TabStatsIcon focused={focused} />,
         }}
       />
       <Tabs.Screen name="index" options={{ href: null }} />

@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { ScrollView, Text, View, StyleSheet } from 'react-native';
+import { Pressable, ScrollView, Text, View, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { BrandTitle, Body, Button, Chip, Field, Screen, Title } from '@/src/design-system/ui';
-import { colors, spacing } from '@/src/design-system/theme';
+import { colors, spacing, typography } from '@/src/design-system/theme';
+import { ClassSymbol } from '@/src/design-system/icons';
 import { CLASSES } from '@/src/data/content/classes';
 import { GOAL_TEMPLATES } from '@/src/data/content/goalTemplates';
 import { HELP_LINES, HEALTH_GUARDRAIL } from '@/src/data/content/helpLines';
@@ -60,12 +61,26 @@ export default function OnboardingScreen() {
 
         <View style={{ height: spacing.lg }} />
         <Title>Classe</Title>
-        <View style={styles.row}>
-          {CLASSES.map((c) => (
-            <Chip key={c.id} label={c.name} selected={classId === c.id} onPress={() => setClassId(c.id)} />
-          ))}
+        <Body muted>Chaque classe raconte une façon d'avancer — sans bonus cachés pour l'instant.</Body>
+        <View style={styles.classGrid}>
+          {CLASSES.map((c) => {
+            const selected = classId === c.id;
+            return (
+              <Pressable
+                key={c.id}
+                onPress={() => setClassId(c.id)}
+                accessibilityRole="button"
+                accessibilityState={{ selected }}
+                style={[styles.classCard, selected && styles.classCardSelected]}
+              >
+                <ClassSymbol classId={c.id} size={36} />
+                <Text style={styles.className}>{c.name}</Text>
+                <Text style={styles.classTheme}>{c.theme}</Text>
+                <Text style={styles.classBlurb}>{c.blurb}</Text>
+              </Pressable>
+            );
+          })}
         </View>
-        <Body muted>{CLASSES.find((c) => c.id === classId)?.blurb}</Body>
 
         <View style={{ height: spacing.lg }} />
         <Title>Ton</Title>
@@ -115,6 +130,18 @@ export default function OnboardingScreen() {
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', flexWrap: 'wrap', marginTop: spacing.sm },
+  classGrid: { marginTop: spacing.sm, gap: spacing.sm },
+  classCard: {
+    padding: spacing.md,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.card,
+  },
+  classCardSelected: { borderColor: colors.gold, backgroundColor: colors.mist },
+  className: { ...typography.subtitle, color: colors.ink, marginTop: spacing.sm },
+  classTheme: { ...typography.label, color: colors.gold, marginTop: 4 },
+  classBlurb: { ...typography.caption, color: colors.muted, marginTop: spacing.xs },
   note: {
     marginTop: spacing.md,
     padding: spacing.md,

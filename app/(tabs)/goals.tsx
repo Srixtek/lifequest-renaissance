@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ScrollView, View, Text, StyleSheet } from 'react-native';
+import { Pressable, ScrollView, View, Text, StyleSheet } from 'react-native';
 import { Body, Button, Chip, Field, Screen, Title } from '@/src/design-system/ui';
-import { colors, spacing } from '@/src/design-system/theme';
+import { colors, spacing, typography } from '@/src/design-system/theme';
+import { FantasyPanel } from '@/src/design-system/FantasyPanel';
+import { EmptyState, QuestCard } from '@/src/design-system/QuestCard';
+import { CATEGORY_LABELS } from '@/src/design-system/categoryLabels';
+import { completionRatio } from '@/src/domain/rules/xp';
 import { useAppStore } from '@/src/state/appStore';
 import { getDb } from '@/src/data/db/client';
 import { confirmGoalDay, logGoalNumeric } from '@/src/domain/services/trackingService';
@@ -130,7 +134,7 @@ export default function GoalsScreen() {
           'Enregistré. Cet objectif comptera pour l\'XP à partir de demain (budget du jour déjà figé).',
         );
       } else if (r.duplicate) {
-        showFeedback('Enregistré — écriture déjà comptabilisée (idempotence).');
+        showFeedback('Déjà enregistré pour aujourd\'hui — rien n\'a été modifié.');
       } else if (r.rewardUnchanged) {
         const shard = r.shardsGranted ? ' · +1 éclat de participation' : '';
         showFeedback(`Enregistré, récompense inchangée.${shard}`);
@@ -306,16 +310,19 @@ export default function GoalsScreen() {
   return (
     <Screen>
       <ScrollView contentContainerStyle={{ paddingBottom: spacing.xxl, paddingTop: spacing.sm }}>
-        <Title>Objectifs — {today}</Title>
+        <Title>Habitudes</Title>
+        <Text style={styles.dateLine}>{today}</Text>
         <Body muted>
           Vide ≠ zéro. Les jours sans saisie restent « non renseignés » (0 XP). Corrige librement dans la journée.
         </Body>
         {flash ? <Text style={styles.flash}>{flash}</Text> : null}
 
+        <Text style={styles.sectionHeading}>Mes habitudes actives</Text>
         {activeGoals.length === 0 ? (
-          <View style={{ marginTop: spacing.md }}>
-            <Body muted>Aucun objectif actif. Ajoute un modèle ou crée un objectif personnalisé.</Body>
-          </View>
+          <EmptyState
+            title="Pas encore d'habitude"
+            hint="Choisis un modèle ci-dessous ou crée un objectif sur mesure."
+          />
         ) : null}
 
         {activeGoals.map((g) => {
@@ -326,25 +333,27 @@ export default function GoalsScreen() {
           const savedValue =
             tr?.value != null
               ? `${tr.value}${g.unit ? ` ${g.unit}` : ''}`
-              : status === 'unknown'
-                ? '—'
-                : '—';
+              : '—';
           const tpl = GOAL_TEMPLATES.find((t) => t.id === g.templateId);
           const initialDraft =
             draftValues[g.id] ?? (tr?.value != null ? String(tr.value) : '');
+          const targetLabel =
+            ver?.target != null ? `Cible : ${ver.target}${g.unit ? ` ${g.unit}` : ''}` : GOAL_KIND_LABELS[g.kind];
+          const progress =
+            ver?.target != null && tr?.value != null
+              ? completionRatio(status, g.kind, tr.value, ver.target)
+              : undefined;
 
           return (
-            <View key={g.id} style={styles.card}>
-              <Text style={styles.goalTitle}>{g.title}</Text>
-              <Body muted>
-                {GOAL_KIND_LABELS[g.kind]}
-                {ver?.target != null ? ` · cible ${ver.target}${g.unit ? ` ${g.unit}` : ''}` : ''}
-              </Body>
-              <Body muted>
-                Statut : {STATUS_FR[status]}
-                {g.status === 'paused' ? ' (objectif en pause)' : ''}
-              </Body>
-              <Body muted>Enregistré : {savedValue}</Body>
+            <QuestCard
+              key={g.id}
+              title={g.title}
+              category={tpl?.category}
+              status={status}
+              targetLabel={targetLabel}
+              valueLabel={savedValue}
+              progress={progress}
+            >
 
               {tpl?.neutralNote ? (
                 <View style={styles.note}>
@@ -421,7 +430,7 @@ export default function GoalsScreen() {
                 </>
               ) : null}
 
-              <View style={styles.row}>
+              <View style={styles.manageRow}>
                 <Chip
                   label={g.status === 'paused' ? 'Reprendre' : 'Pause'}
                   onPress={() => {
@@ -444,22 +453,31 @@ export default function GoalsScreen() {
                   }}
                 />
               </View>
-            </View>
+            </QuestCard>
           );
         })}
 
-        <Title>Modèles (A–F)</Title>
-        <Body muted>Tous optionnels. A= vape, B= alcool, C= fréquence, D= sport, E= sans écran, F= appel proche.</Body>
-        <View style={styles.row}>
-          {GOAL_TEMPLATES.filter((t) => t.id !== 'breathing5').map((t) => (
-            <Chip
-              key={t.id}
-              label={`${t.category}. ${t.title}`}
-              onPress={() => void beginTemplate(t.id)}
-              selected={pendingTemplateId === t.id}
-            />
-          ))}
-        </View>
+        <FantasyPanel accent>
+          <Text style={styles.sectionHeading}>Ajouter une habitude</Text>
+          <Body muted>Six familles optionnelles — choisis ce qui te correspond aujourd'hui.</Body>
+          <View style={styles.templateGrid}>
+            {GOAL_TEMPLATES.filter((t) => t.id !== 'breathing5').map((t) => (
+              <Pressable
+                key={t.id}
+                onPress={() => void beginTemplate(t.id)}
+                accessibilityRole="button"
+                style={({ pressed }) => [
+                  styles.templateCard,
+                  pendingTemplateId === t.id && styles.templateCardSelected,
+                  pressed && { opacity: 0.85 },
+                ]}
+              >
+                <Text style={styles.templateCat}>{CATEGORY_LABELS[t.category]}</Text>
+                <Text style={styles.templateTitle}>{t.title}</Text>
+              </Pressable>
+            ))}
+          </View>
+        </FantasyPanel>
 
         {pendingTemplateId ? (
           <View style={styles.note}>
@@ -509,7 +527,8 @@ export default function GoalsScreen() {
           </View>
         ) : null}
 
-        <Title>Objectif personnalisé</Title>
+        <FantasyPanel>
+          <Text style={styles.sectionHeading}>Créer un objectif personnalisé</Text>
         {showCustom ? (
           <View>
             <Field value={customTitle} onChangeText={setCustomTitle} placeholder="Nom" />
@@ -552,24 +571,24 @@ export default function GoalsScreen() {
             <Button label="Annuler" onPress={() => setShowCustom(false)} variant="ghost" />
           </View>
         ) : (
-          <Button label="Nouvel objectif personnalisé" onPress={() => setShowCustom(true)} variant="ghost" />
+          <Button label="Nouvel objectif personnalisé" onPress={() => setShowCustom(true)} variant="secondary" />
         )}
+        </FantasyPanel>
       </ScrollView>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  card: {
-    marginTop: spacing.md,
-    padding: spacing.md,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.line,
-    backgroundColor: colors.bgElevated,
+  dateLine: { ...typography.caption, color: colors.gold, marginBottom: spacing.sm },
+  sectionHeading: {
+    ...typography.subtitle,
+    color: colors.ink,
+    marginTop: spacing.lg,
+    marginBottom: spacing.sm,
   },
-  goalTitle: { color: colors.ink, fontSize: 17, fontWeight: '700' },
   row: { flexDirection: 'row', flexWrap: 'wrap', marginTop: spacing.sm },
+  manageRow: { flexDirection: 'row', flexWrap: 'wrap', marginTop: spacing.md, opacity: 0.9 },
   flash: { color: colors.ember, marginTop: spacing.sm },
   note: {
     marginTop: spacing.sm,
@@ -579,4 +598,15 @@ const styles = StyleSheet.create({
     borderColor: colors.line,
     backgroundColor: colors.bg,
   },
+  templateGrid: { marginTop: spacing.sm, gap: spacing.sm },
+  templateCard: {
+    padding: spacing.md,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.card,
+  },
+  templateCardSelected: { borderColor: colors.gold, backgroundColor: colors.mist },
+  templateCat: { ...typography.label, color: colors.gold, fontSize: 11 },
+  templateTitle: { ...typography.body, color: colors.ink, marginTop: 4 },
 });

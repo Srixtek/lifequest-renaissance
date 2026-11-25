@@ -40,7 +40,7 @@ export function Button({
 }: {
   label: string;
   onPress: () => void;
-  variant?: 'primary' | 'ghost' | 'danger';
+  variant?: 'primary' | 'secondary' | 'ghost' | 'danger';
   disabled?: boolean;
 }) {
   return (
@@ -50,6 +50,7 @@ export function Button({
       onPress={onPress}
       style={({ pressed }) => [
         styles.btn,
+        variant === 'secondary' && styles.btnSecondary,
         variant === 'ghost' && styles.btnGhost,
         variant === 'danger' && styles.btnDanger,
         (pressed || disabled) && { opacity: 0.7 },
@@ -58,6 +59,7 @@ export function Button({
       <Text
         style={[
           styles.btnText,
+          variant === 'secondary' && styles.btnTextSecondary,
           variant === 'ghost' && styles.btnTextGhost,
           variant === 'danger' && styles.btnTextDanger,
         ]}
@@ -119,6 +121,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: spacing.sm,
   },
+  btnSecondary: {
+    backgroundColor: colors.mist,
+    borderWidth: 1,
+    borderColor: colors.emeraldDim,
+  },
   btnGhost: {
     backgroundColor: 'transparent',
     borderWidth: 1,
@@ -126,6 +133,7 @@ const styles = StyleSheet.create({
   },
   btnDanger: { backgroundColor: colors.danger },
   btnText: { color: colors.bg, fontWeight: '700', fontSize: 16 },
+  btnTextSecondary: { color: colors.ink },
   btnTextGhost: { color: colors.ink },
   btnTextDanger: { color: colors.ink },
   input: {

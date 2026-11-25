@@ -1,8 +1,10 @@
 import { useCallback, useState } from 'react';
-import { ScrollView, Text, StyleSheet } from 'react-native';
+import { ScrollView, Text, View, StyleSheet } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { Body, Screen, Title } from '@/src/design-system/ui';
-import { colors, spacing } from '@/src/design-system/theme';
+import { colors, spacing, typography } from '@/src/design-system/theme';
+import { FantasyPanel } from '@/src/design-system/FantasyPanel';
+import { ClassSymbol } from '@/src/design-system/icons';
 import { useAppStore } from '@/src/state/appStore';
 import { getDb } from '@/src/data/db/client';
 import { listEquipment, listInventory } from '@/src/data/db/repositories/rpgRepo';
@@ -25,7 +27,8 @@ export default function CharacterScreen() {
     }, []),
   );
 
-  const className = CLASSES.find((c) => c.id === profile?.classId)?.name ?? profile?.classId;
+  const classDef = CLASSES.find((c) => c.id === profile?.classId);
+  const className = classDef?.name ?? profile?.classId;
 
   return (
     <Screen>
@@ -35,6 +38,20 @@ export default function CharacterScreen() {
           {className} · Niveau {character?.level} · {Math.round(character?.totalXp ?? 0)} XP · Camp{' '}
           {character?.campLevel}
         </Body>
+        {classDef ? (
+          <FantasyPanel accent>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.md }}>
+              <ClassSymbol classId={classDef.id} size={40} />
+              <View style={{ flex: 1 }}>
+                <Text style={{ ...typography.subtitle, color: colors.gold }}>{classDef.theme}</Text>
+                <Body muted>{classDef.blurb}</Body>
+                <View style={{ marginTop: spacing.xs }}>
+                  <Body muted>Aucune capacité spéciale pour l'instant — elles arriveront avec la mission RPG.</Body>
+                </View>
+              </View>
+            </View>
+          </FantasyPanel>
+        ) : null}
         <Text style={styles.section}>Équipement</Text>
         {eq.map((s) => (
           <Body key={s.slot}>
