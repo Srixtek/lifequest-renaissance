@@ -1,17 +1,15 @@
 import { useState } from 'react';
 import { ScrollView, Text, StyleSheet } from 'react-native';
-import * as DocumentPicker from 'expo-document-picker';
 import * as Sharing from 'expo-sharing';
 import { Body, Button, Screen, Title } from '@/src/design-system/ui';
 import { colors, spacing } from '@/src/design-system/theme';
 import { HELP_LINES, HEALTH_GUARDRAIL } from '@/src/data/content/helpLines';
 import { getDb } from '@/src/data/db/client';
-import { exportBackup, importBackup, previewBackup } from '@/src/domain/services/backupService';
+import { exportBackup } from '@/src/domain/services/backupService';
 import { useAppStore } from '@/src/state/appStore';
 import { DAILY_XP_BUDGET, XP_RULE_VERSION } from '@/src/domain/rules/xp';
 
 export default function SettingsScreen() {
-  const refresh = useAppStore((s) => s.refresh);
   const profile = useAppStore((s) => s.profile);
   const [msg, setMsg] = useState<string | null>(null);
 
@@ -30,7 +28,10 @@ export default function SettingsScreen() {
         </Body>
 
         <Text style={styles.section}>Sauvegarde (.lqbackup)</Text>
-        <Body muted>Export ZIP (manifest + data). Import = remplacement complet contrôlé.</Body>
+        <Body muted>
+          Export ZIP (manifest + données). Import désactivé sur cette préversion (audit sécurité non terminé) — export
+          uniquement.
+        </Body>
         <Button
           label="Exporter la sauvegarde"
           onPress={async () => {
@@ -43,22 +44,13 @@ export default function SettingsScreen() {
           }}
         />
         <Button
-          label="Importer une sauvegarde"
+          label="Import indisponible (préversion)"
           variant="ghost"
-          onPress={async () => {
-            const picked = await DocumentPicker.getDocumentAsync({
-              copyToCacheDirectory: true,
-              type: '*/*',
-            });
-            if (picked.canceled || !picked.assets?.[0]) return;
-            const uri = picked.assets[0].uri;
-            const preview = await previewBackup(uri);
-            // Safety backup first
-            const db = await getDb();
-            await exportBackup(db);
-            await importBackup(db, uri);
-            await refresh();
-            setMsg(`Import OK : ${preview.pseudo} · ${preview.goalCount} objectifs · ${preview.xpTotal} XP`);
+          disabled
+          onPress={() => {
+            setMsg(
+              'Import désactivé sur 0.2.0-preview.1. Le code de restauration reste présent ; un audit viendra avant réactivation.',
+            );
           }}
         />
 
