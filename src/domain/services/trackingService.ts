@@ -13,12 +13,30 @@ import {
 } from '../rules/xp';
 import { nowIso } from '../rules/dates';
 import { createId } from '../../utils/id';
+import { statusFromLog } from '../rules/trackingStatus';
 
 export interface ConfirmResult {
   xpGranted: number;
   shardsGranted: number;
   duplicate: boolean;
   status: TrackingStatus;
+  value: number | null;
+}
+
+/** Save a numeric daily log and derive status. Empty input must not call this. */
+export async function logGoalNumeric(
+  db: Db,
+  goalId: string,
+  localDate: string,
+  value: number,
+  note: string | null = null,
+): Promise<ConfirmResult> {
+  const goals = (await goalRepo.listGoals(db)).filter((g) => g.status === 'active');
+  const goal = goals.find((g) => g.id === goalId);
+  if (!goal) throw new Error('Objectif introuvable');
+  const version = await goalRepo.getCurrentVersion(db, goalId);
+  const status = statusFromLog(goal, version, value);
+  return confirmGoalDay(db, goalId, localDate, status, value, note);
 }
 
 /**
@@ -38,7 +56,8 @@ export async function confirmGoalDay(
   if (!goal) throw new Error('Objectif introuvable');
 
   const version = await goalRepo.getCurrentVersion(db, goalId);
-  const eventId = createId('trk');
+  const prior = await goalRepo.getTracking(db, goalId, localDate);
+  const eventId = prior?.id ?? createId('trk');
   const ts = nowIso();
   await goalRepo.upsertTracking(db, {
     id: eventId,
@@ -47,19 +66,19 @@ export async function confirmGoalDay(
     status,
     value,
     note,
-    createdAt: ts,
+    createdAt: prior?.createdAt ?? ts,
     updatedAt: ts,
   });
 
   if (status === 'unknown' || status === 'paused' || goal.followWithoutXp) {
-    return { xpGranted: 0, shardsGranted: 0, duplicate: false, status };
+    return { xpGranted: 0, shardsGranted: 0, duplicate: false, status, value };
   }
 
   const potentials = potentialXpForGoals(goals);
   const ratio = completionRatio(status, goal.kind, value, version?.targetValue ?? null);
   const xp = earnedXp(potentials[goalId] ?? 0, ratio);
   if (xp <= 0) {
-    return { xpGranted: 0, shardsGranted: 0, duplicate: false, status };
+    return { xpGranted: 0, shardsGranted: 0, duplicate: false, status, value };
   }
 
   const key = idempotencyKeyDailyGoal(goalId, localDate);
@@ -85,5 +104,11 @@ export async function confirmGoalDay(
     await rpgRepo.addShards(db, shards, `shards from ${goalId} ${localDate}`, `shards:${key}`);
   });
 
-  return { xpGranted: duplicate ? 0 : xp, shardsGranted: duplicate ? 0 : shards, duplicate, status };
+  return {
+    xpGranted: duplicate ? 0 : xp,
+    shardsGranted: duplicate ? 0 : shards,
+    duplicate,
+    status,
+    value,
+  };
 }

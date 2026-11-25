@@ -19,7 +19,7 @@ export default function OnboardingScreen() {
   const [pseudo, setPseudo] = useState('');
   const [classId, setClassId] = useState<ClassId>('rodeur');
   const [tone, setTone] = useState<'fantasy' | 'sobre'>('fantasy');
-  const [selected, setSelected] = useState<string[]>(['no_vape', 'breathing5']);
+  const [selected, setSelected] = useState<string[]>(['vape_sessions', 'breathing5']);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 

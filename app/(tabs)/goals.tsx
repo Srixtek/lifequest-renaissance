@@ -1,15 +1,32 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { ScrollView, View, Text, StyleSheet } from 'react-native';
-import { Body, Button, Chip, Screen, Title } from '@/src/design-system/ui';
+import { Body, Button, Chip, Field, Screen, Title } from '@/src/design-system/ui';
 import { colors, spacing } from '@/src/design-system/theme';
 import { useAppStore } from '@/src/state/appStore';
 import { getDb } from '@/src/data/db/client';
-import { confirmGoalDay } from '@/src/domain/services/trackingService';
-import { insertGoal, setGoalStatus } from '@/src/data/db/repositories/goalRepo';
-import { GOAL_TEMPLATES } from '@/src/data/content/goalTemplates';
+import { confirmGoalDay, logGoalNumeric } from '@/src/domain/services/trackingService';
+import {
+  getCurrentVersion,
+  insertGoal,
+  listGoals,
+  setGoalStatus,
+} from '@/src/data/db/repositories/goalRepo';
+import { GOAL_KIND_LABELS, GOAL_TEMPLATES } from '@/src/data/content/goalTemplates';
 import { createId } from '@/src/utils/id';
 import { nowIso } from '@/src/domain/rules/dates';
-import type { TrackingStatus } from '@/src/domain/models/types';
+import type { GoalDefinition, GoalKind, GoalTier, TrackingStatus } from '@/src/domain/models/types';
+import { parseLogValue, usesNumericLog } from '@/src/domain/rules/trackingStatus';
+import { HELP_LINES, HEALTH_GUARDRAIL } from '@/src/data/content/helpLines';
+
+const STATUS_FR: Record<TrackingStatus, string> = {
+  unknown: 'Non renseigné',
+  success: 'Réussi',
+  partial: 'Partiel',
+  miss: 'Écart',
+  paused: 'En pause',
+};
+
+const KINDS: GoalKind[] = ['habit', 'abstinence', 'limit', 'reduce', 'duration', 'quantity'];
 
 export default function GoalsScreen() {
   const goals = useAppStore((s) => s.goals);
@@ -17,16 +34,67 @@ export default function GoalsScreen() {
   const todayTracking = useAppStore((s) => s.todayTracking);
   const refresh = useAppStore((s) => s.refresh);
   const [flash, setFlash] = useState<string | null>(null);
+  const [draftValues, setDraftValues] = useState<Record<string, string>>({});
+  const [versions, setVersions] = useState<Record<string, { unit: string | null; target: number | null }>>({});
+  const [showCustom, setShowCustom] = useState(false);
+  const [customTitle, setCustomTitle] = useState('');
+  const [customKind, setCustomKind] = useState<GoalKind>('habit');
+  const [customUnit, setCustomUnit] = useState('');
+  const [customTarget, setCustomTarget] = useState('');
+  const [customTier, setCustomTier] = useState<GoalTier>('normal');
+
+  const activeGoals = goals.filter((g) => g.status !== 'archived');
+
+  const templateNotes = useMemo(() => {
+    const added = new Set(goals.map((g) => g.templateId).filter(Boolean));
+    return GOAL_TEMPLATES.filter((t) => added.has(t.id));
+  }, [goals]);
+
+  const ensureVersions = async (list: GoalDefinition[]) => {
+    const db = await getDb();
+    const next: Record<string, { unit: string | null; target: number | null }> = { ...versions };
+    for (const g of list) {
+      if (next[g.id]) continue;
+      const v = await getCurrentVersion(db, g.id);
+      next[g.id] = { unit: g.unit, target: v?.targetValue ?? null };
+    }
+    setVersions(next);
+  };
+
+  if (Object.keys(versions).length < activeGoals.length) {
+    void ensureVersions(activeGoals);
+  }
+
+  const showFeedback = (msg: string) => {
+    setFlash(msg);
+  };
 
   const confirm = async (goalId: string, status: TrackingStatus, value: number | null = null) => {
     const db = await getDb();
     const r = await confirmGoalDay(db, goalId, today, status, value);
-    setFlash(
+    showFeedback(
       r.duplicate
         ? 'XP déjà versée pour cet objectif aujourd\'hui (idempotence).'
         : status === 'unknown'
           ? 'Statut : non renseigné (0 XP).'
-          : `+${r.xpGranted} XP · +${r.shardsGranted} éclat(s)`,
+          : `Enregistré · +${r.xpGranted} XP · +${r.shardsGranted} éclat(s)`,
+    );
+    await refresh();
+  };
+
+  const saveNumeric = async (goal: GoalDefinition) => {
+    const raw = draftValues[goal.id] ?? '';
+    const parsed = parseLogValue(raw);
+    if (!parsed.ok) {
+      showFeedback(parsed.error === 'Vide' ? 'Saisis une valeur (le vide n\'est pas zéro).' : parsed.error);
+      return;
+    }
+    const db = await getDb();
+    const r = await logGoalNumeric(db, goal.id, today, parsed.value);
+    showFeedback(
+      r.duplicate
+        ? `Valeur ${parsed.value} enregistrée · XP déjà versée aujourd'hui.`
+        : `Valeur ${parsed.value} enregistrée (${STATUS_FR[r.status]}) · +${r.xpGranted} XP`,
     );
     await refresh();
   };
@@ -35,6 +103,11 @@ export default function GoalsScreen() {
     const t = GOAL_TEMPLATES.find((x) => x.id === templateId);
     if (!t) return;
     const db = await getDb();
+    const existing = (await listGoals(db, true)).some((g) => g.templateId === templateId && g.status !== 'archived');
+    if (existing) {
+      showFeedback('Ce modèle est déjà actif.');
+      return;
+    }
     const goalId = createId('goal');
     const createdAt = nowIso();
     await insertGoal(
@@ -65,33 +138,182 @@ export default function GoalsScreen() {
       },
     );
     await refresh();
+    showFeedback(`Objectif « ${t.title} » ajouté.`);
   };
+
+  const createCustom = async () => {
+    const title = customTitle.trim();
+    if (!title) {
+      showFeedback('Donne un nom à l\'objectif.');
+      return;
+    }
+    let targetValue: number | null = null;
+    if (customTarget.trim()) {
+      const p = parseLogValue(customTarget);
+      if (!p.ok) {
+        showFeedback(p.error);
+        return;
+      }
+      targetValue = p.value;
+    }
+    const db = await getDb();
+    const goalId = createId('goal');
+    const createdAt = nowIso();
+    const unit = customUnit.trim() || null;
+    await insertGoal(
+      db,
+      {
+        id: goalId,
+        title,
+        kind: customKind,
+        unit,
+        weight: 1,
+        status: 'active',
+        templateId: null,
+        sensitive: false,
+        followWithoutXp: false,
+        createdAt,
+      },
+      {
+        id: createId('gver'),
+        goalId,
+        version: 1,
+        tier: customTier,
+        targetValue,
+        scheduleKind: 'daily',
+        weeklyTargetCount: null,
+        notes: null,
+        effectiveFrom: createdAt.slice(0, 10),
+        effectiveTo: null,
+      },
+    );
+    setCustomTitle('');
+    setCustomUnit('');
+    setCustomTarget('');
+    setShowCustom(false);
+    await refresh();
+    showFeedback(`Objectif personnalisé « ${title} » créé.`);
+  };
+
+  const binaryAbstinence = (g: GoalDefinition) => g.kind === 'abstinence';
+  const binaryHabit = (g: GoalDefinition) => g.kind === 'habit';
 
   return (
     <Screen>
       <ScrollView contentContainerStyle={{ paddingBottom: spacing.xxl, paddingTop: spacing.sm }}>
         <Title>Objectifs — {today}</Title>
-        <Body muted>Par défaut : Non renseigné. Confirme honnêtement.</Body>
+        <Body muted>
+          Vide ≠ zéro. Les jours sans saisie restent « non renseignés » (0 XP). Corrige librement dans la journée.
+        </Body>
         {flash ? <Text style={styles.flash}>{flash}</Text> : null}
 
-        {goals.map((g) => {
+        {activeGoals.length === 0 ? (
+          <View style={{ marginTop: spacing.md }}>
+            <Body muted>Aucun objectif actif. Ajoute un modèle ou crée un objectif personnalisé.</Body>
+          </View>
+        ) : null}
+
+        {activeGoals.map((g) => {
           const tr = todayTracking[g.id];
-          const status = tr?.status ?? 'unknown';
+          const status = g.status === 'paused' ? 'paused' : (tr?.status ?? 'unknown');
+          const ver = versions[g.id];
+          const numeric = usesNumericLog(g.kind);
+          const savedValue =
+            tr?.value != null
+              ? `${tr.value}${g.unit ? ` ${g.unit}` : ''}`
+              : status === 'unknown'
+                ? '—'
+                : '—';
+          const tpl = GOAL_TEMPLATES.find((t) => t.id === g.templateId);
+          const initialDraft =
+            draftValues[g.id] ?? (tr?.value != null ? String(tr.value) : '');
+
           return (
             <View key={g.id} style={styles.card}>
               <Text style={styles.goalTitle}>{g.title}</Text>
               <Body muted>
-                Statut : {status === 'unknown' ? 'Non renseigné' : status} · {g.status}
+                {GOAL_KIND_LABELS[g.kind]}
+                {ver?.target != null ? ` · cible ${ver.target}${g.unit ? ` ${g.unit}` : ''}` : ''}
               </Body>
-              <View style={styles.row}>
-                <Chip label="Fait" selected={status === 'success'} onPress={() => confirm(g.id, 'success')} />
-                <Chip label="Partiel" selected={status === 'partial'} onPress={() => confirm(g.id, 'partial')} />
-                <Chip label="Écart" selected={status === 'miss'} onPress={() => confirm(g.id, 'miss')} />
-                <Chip label="Non renseigné" selected={status === 'unknown'} onPress={() => confirm(g.id, 'unknown')} />
-              </View>
+              <Body muted>
+                Statut : {STATUS_FR[status]}
+                {g.status === 'paused' ? ' (objectif en pause)' : ''}
+              </Body>
+              <Body muted>Enregistré : {savedValue}</Body>
+
+              {tpl?.neutralNote ? (
+                <View style={styles.note}>
+                  <Body>{tpl.neutralNote}</Body>
+                </View>
+              ) : null}
+              {tpl?.nicotineNote ? (
+                <View style={styles.note}>
+                  <Body>
+                    Nicotine : aides validées (39 89). Aucune abstinence automatique — déclare tes séances.
+                  </Body>
+                </View>
+              ) : null}
+              {tpl?.alcoholSafety ? (
+                <View style={styles.note}>
+                  <Body>
+                    Précaution : un arrêt brutal peut être dangereux — parles-en à un médecin ({HELP_LINES[1].phone}).
+                    Verre standard FR = 10 g d'alcool pur.
+                  </Body>
+                </View>
+              ) : null}
+
+              {g.status !== 'paused' && numeric ? (
+                <>
+                  <Field
+                    value={initialDraft}
+                    onChangeText={(t) => setDraftValues((d) => ({ ...d, [g.id]: t }))}
+                    placeholder={g.unit ? `Quantité (${g.unit})` : 'Valeur'}
+                    keyboardType="decimal-pad"
+                    accessibilityLabel={`Saisie ${g.title}`}
+                  />
+                  <Button label="Enregistrer la valeur" onPress={() => saveNumeric(g)} variant="primary" />
+                </>
+              ) : null}
+
+              {g.status !== 'paused' && (binaryHabit(g) || binaryAbstinence(g)) ? (
+                <>
+                  <Body muted>Confirmation explicite requise :</Body>
+                  <View style={styles.row}>
+                    {binaryAbstinence(g) ? (
+                      <>
+                        <Chip
+                          label="Jour sans consommation"
+                          selected={status === 'success'}
+                          onPress={() => confirm(g.id, 'success', 0)}
+                        />
+                        <Chip
+                          label="J'ai consommé"
+                          selected={status === 'miss'}
+                          onPress={() => confirm(g.id, 'miss', 1)}
+                        />
+                      </>
+                    ) : (
+                      <>
+                        <Chip
+                          label="Fait"
+                          selected={status === 'success'}
+                          onPress={() => confirm(g.id, 'success')}
+                        />
+                        <Chip label="Pas fait" selected={status === 'miss'} onPress={() => confirm(g.id, 'miss')} />
+                      </>
+                    )}
+                    <Chip
+                      label="Non renseigné"
+                      selected={status === 'unknown'}
+                      onPress={() => confirm(g.id, 'unknown', null)}
+                    />
+                  </View>
+                </>
+              ) : null}
+
               <View style={styles.row}>
                 <Chip
-                  label="Pause"
+                  label={g.status === 'paused' ? 'Reprendre' : 'Pause'}
                   onPress={async () => {
                     const db = await getDb();
                     await setGoalStatus(db, g.id, g.status === 'paused' ? 'active' : 'paused');
@@ -103,6 +325,7 @@ export default function GoalsScreen() {
                   onPress={async () => {
                     const db = await getDb();
                     await setGoalStatus(db, g.id, 'archived');
+                    showFeedback('Archivé — l\'historique est conservé.');
                     await refresh();
                   }}
                 />
@@ -111,12 +334,58 @@ export default function GoalsScreen() {
           );
         })}
 
-        <Title>Ajouter un modèle</Title>
+        <Title>Modèles (A–F)</Title>
+        <Body muted>Tous optionnels. A= vape, B= alcool, C= fréquence, D= sport, E= sans écran, F= appel proche.</Body>
         <View style={styles.row}>
-          {GOAL_TEMPLATES.map((t) => (
-            <Chip key={t.id} label={`+ ${t.title}`} onPress={() => addTemplate(t.id)} />
+          {GOAL_TEMPLATES.filter((t) => t.id !== 'breathing5').map((t) => (
+            <Chip key={t.id} label={`${t.category}. ${t.title}`} onPress={() => addTemplate(t.id)} />
           ))}
         </View>
+
+        {templateNotes.some((t) => t.alcoholSafety || t.nicotineNote) ? (
+          <View style={styles.note}>
+            <Body muted>{HEALTH_GUARDRAIL}</Body>
+          </View>
+        ) : null}
+
+        <Title>Objectif personnalisé</Title>
+        {showCustom ? (
+          <View>
+            <Field value={customTitle} onChangeText={setCustomTitle} placeholder="Nom" />
+            <Body muted>Type</Body>
+            <View style={styles.row}>
+              {KINDS.map((k) => (
+                <Chip
+                  key={k}
+                  label={GOAL_KIND_LABELS[k]}
+                  selected={customKind === k}
+                  onPress={() => setCustomKind(k)}
+                />
+              ))}
+            </View>
+            <Field value={customUnit} onChangeText={setCustomUnit} placeholder="Unité (facultatif)" />
+            <Field
+              value={customTarget}
+              onChangeText={setCustomTarget}
+              placeholder="Cible numérique (facultatif)"
+              keyboardType="decimal-pad"
+            />
+            <View style={styles.row}>
+              {(['minimal', 'normal', 'ambitieux'] as GoalTier[]).map((tier) => (
+                <Chip
+                  key={tier}
+                  label={tier}
+                  selected={customTier === tier}
+                  onPress={() => setCustomTier(tier)}
+                />
+              ))}
+            </View>
+            <Button label="Créer l'objectif" onPress={createCustom} />
+            <Button label="Annuler" onPress={() => setShowCustom(false)} variant="ghost" />
+          </View>
+        ) : (
+          <Button label="Nouvel objectif personnalisé" onPress={() => setShowCustom(true)} variant="ghost" />
+        )}
       </ScrollView>
     </Screen>
   );
@@ -134,4 +403,12 @@ const styles = StyleSheet.create({
   goalTitle: { color: colors.ink, fontSize: 17, fontWeight: '700' },
   row: { flexDirection: 'row', flexWrap: 'wrap', marginTop: spacing.sm },
   flash: { color: colors.ember, marginTop: spacing.sm },
+  note: {
+    marginTop: spacing.sm,
+    padding: spacing.sm,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.bg,
+  },
 });
