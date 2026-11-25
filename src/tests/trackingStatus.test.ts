@@ -3,6 +3,7 @@ import {
   parseLogValue,
   statusFromLog,
   usesNumericLog,
+  validateCreationTarget,
 } from '../domain/rules/trackingStatus';
 
 describe('parseLogValue', () => {
@@ -18,6 +19,31 @@ describe('parseLogValue', () => {
 
   test('rejects negative', () => {
     expect(parseLogValue('-1').ok).toBe(false);
+  });
+
+  test('rejects non-finite strings', () => {
+    expect(parseLogValue('NaN').ok).toBe(false);
+    expect(parseLogValue('Infinity').ok).toBe(false);
+  });
+});
+
+describe('validateCreationTarget', () => {
+  test('limit and reduce require target; zero allowed', () => {
+    expect(validateCreationTarget('limit', '').ok).toBe(false);
+    expect(validateCreationTarget('limit', '0')).toEqual({ ok: true, value: 0 });
+    expect(validateCreationTarget('reduce', '2')).toEqual({ ok: true, value: 2 });
+  });
+
+  test('duration and quantity require target > 0', () => {
+    expect(validateCreationTarget('duration', '').ok).toBe(false);
+    expect(validateCreationTarget('duration', '0').ok).toBe(false);
+    expect(validateCreationTarget('duration', '30')).toEqual({ ok: true, value: 30 });
+  });
+
+  test('binary kinds forbid numeric target', () => {
+    expect(validateCreationTarget('habit', '')).toEqual({ ok: true, value: null });
+    expect(validateCreationTarget('habit', '5').ok).toBe(false);
+    expect(validateCreationTarget('abstinence', '1').ok).toBe(false);
   });
 });
 

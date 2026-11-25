@@ -67,6 +67,45 @@ export function usesNumericLog(kind: GoalKind): boolean {
   return !isBinaryGoal(kind);
 }
 
+export type ValidateTargetResult =
+  | { ok: true; value: number | null }
+  | { ok: false; error: string };
+
+export function kindRequiresNumericTarget(kind: GoalKind): boolean {
+  return kind === 'limit' || kind === 'reduce' || kind === 'duration' || kind === 'quantity';
+}
+
+/** Target rules when creating a goal (custom or from template). */
+export function validateCreationTarget(kind: GoalKind, raw: string): ValidateTargetResult {
+  if (isBinaryGoal(kind)) {
+    if (raw.trim() !== '') {
+      return { ok: false, error: 'Les objectifs oui/non n\'ont pas de cible numérique.' };
+    }
+    return { ok: true, value: null };
+  }
+  if (!kindRequiresNumericTarget(kind)) {
+    return { ok: true, value: null };
+  }
+  const trimmed = raw.trim();
+  if (trimmed === '') {
+    return { ok: false, error: 'Une cible numérique est requise pour ce type d\'objectif.' };
+  }
+  const parsed = parseLogValue(trimmed);
+  if (!parsed.ok) {
+    return {
+      ok: false,
+      error:
+        parsed.error === 'Vide'
+          ? 'Une cible numérique est requise pour ce type d\'objectif.'
+          : parsed.error,
+    };
+  }
+  if ((kind === 'duration' || kind === 'quantity') && parsed.value <= 0) {
+    return { ok: false, error: 'La cible doit être supérieure à 0 pour ce type.' };
+  }
+  return { ok: true, value: parsed.value };
+}
+
 export function statusFromLog(
   goal: Pick<GoalDefinition, 'kind'>,
   version: GoalVersion | null,
