@@ -16,6 +16,7 @@ export interface GoalStats {
   window: number;
   coverageRatio: number;
   successCount: number;
+  followWithoutXp: boolean;
 }
 
 export async function goalChart(
@@ -35,7 +36,8 @@ export async function goalChart(
     return { date: d, status: e?.status ?? 'unknown', value: e?.value ?? null };
   });
   const covered = points.filter((p) => p.status !== 'unknown').length;
-  const successCount = points.filter((p) => p.status === 'success').length;
+  const measure = !!goal?.followWithoutXp;
+  const successCount = measure ? 0 : points.filter((p) => p.status === 'success').length;
   return {
     goalId,
     title: goal?.title ?? goalId,
@@ -44,6 +46,7 @@ export async function goalChart(
     window,
     coverageRatio: covered / window,
     successCount,
+    followWithoutXp: measure,
   };
 }
 

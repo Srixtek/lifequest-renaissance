@@ -34,15 +34,19 @@ export ANDROID_SDK_ROOT="$ANDROID_HOME"
 export PATH="$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools"
 export CI=1
 
+RELEASE_SIGNING="${LIFEQUEST_RELEASE_SIGNING:-upload}"
 GRADLE_PROPS="$HOME/.gradle/gradle.properties"
-if [[ ! -f "$GRADLE_PROPS" ]]; then
-  echo "Missing $GRADLE_PROPS with LIFEQUEST_UPLOAD_* keys" >&2
+if [[ "$RELEASE_SIGNING" != "debug" && ! -f "$GRADLE_PROPS" ]]; then
+  echo "Missing $GRADLE_PROPS with LIFEQUEST_UPLOAD_* keys (or set LIFEQUEST_RELEASE_SIGNING=debug)" >&2
   exit 1
 fi
 
 npx expo prebuild --platform android
 
 APP_GRADLE="$ROOT/android/app/build.gradle"
+if [[ "$RELEASE_SIGNING" == "debug" ]]; then
+  echo "Release signing: debug.keystore (preview overlay updates)"
+else
 python3 - "$APP_GRADLE" <<'PY'
 import re
 import sys
@@ -90,6 +94,7 @@ if "signingConfigs.release" in text and "LIFEQUEST_UPLOAD_STORE_FILE" not in tex
 
 p.write_text(text)
 PY
+fi
 
 cd "$ROOT/android"
 ./gradlew assembleRelease --no-daemon

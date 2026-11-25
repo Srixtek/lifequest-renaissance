@@ -14,7 +14,7 @@ import {
 import type { ChallengeSession } from '../domain/models/challengeSession';
 import { getVersionForDate } from '../data/db/repositories/goalRepo';
 import { addDays } from '../domain/rules/dates';
-import { openMemoryDb, resetDbForTests } from '../data/db/client';
+import { nodeSqliteAvailable, openNodeSqliteDb, type TestDb } from './helpers/nodeSqliteDb';
 
 jest.mock('../utils/id', () => {
   let n = 0;
@@ -49,6 +49,15 @@ describe('challengeDuration', () => {
     expect(parsePositiveTargetMinutes('NaN').ok).toBe(false);
     expect(parsePositiveTargetMinutes('Infinity').ok).toBe(false);
     expect(parsePositiveTargetMinutes('15').ok).toBe(true);
+  });
+
+  test('fractional custom minutes resolve to positive seconds', () => {
+    const half = parsePositiveTargetMinutes('0,5');
+    expect(half.ok).toBe(true);
+    if (half.ok) {
+      expect(half.minutes * 60).toBe(30);
+    }
+    expect(parsePositiveTargetMinutes('0.008').ok).toBe(false);
   });
 
   test('sport confirm allows zero and rejects invalid', () => {
@@ -186,29 +195,22 @@ describe('challengeService — transactional mocks', () => {
   });
 });
 
-let sqliteNativeForTests: boolean | undefined;
+const HAS_NODE_SQLITE = nodeSqliteAvailable();
+if (!HAS_NODE_SQLITE) {
+  // eslint-disable-next-line no-console
+  console.warn('[SKIP] getVersionForDate — node:sqlite indisponible (Node < 22.5)');
+}
+const sqliteSuite = HAS_NODE_SQLITE ? describe : describe.skip;
 
-describe('getVersionForDate — SQLite memory', () => {
-  afterEach(async () => {
-    if (sqliteNativeForTests) await resetDbForTests();
+sqliteSuite('getVersionForDate — SQLite réel (node:sqlite, pas expo natif)', () => {
+  let t: TestDb;
+  beforeEach(async () => {
+    t = await openNodeSqliteDb();
   });
+  afterEach(() => t.close());
 
   test('applies version by local date', async () => {
-    if (sqliteNativeForTests === undefined) {
-      try {
-        await openMemoryDb();
-        sqliteNativeForTests = true;
-      } catch (err) {
-        sqliteNativeForTests = false;
-        // eslint-disable-next-line no-console
-        console.warn('[SKIP] getVersionForDate — expo-sqlite indisponible:', err);
-      }
-    }
-    if (!sqliteNativeForTests) {
-      expect(sqliteNativeForTests).toBe(false);
-      return;
-    }
-    const db = await openMemoryDb();
+    const db = t.db;
     const gid = 'g-sqlite';
     const now = '2025-11-26T08:00:00.000Z';
     await db.runAsync(
