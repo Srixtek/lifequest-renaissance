@@ -1,7 +1,6 @@
 import type { Db } from '../../data/db/client';
 import type { SqlRunner } from '../../data/db/sqlRunner';
 import type { RenewableQuestTemplate } from '../../data/content/renewableQuestTemplates';
-import * as combatVictoryRepo from '../../data/db/repositories/combatVictoryRepo';
 import * as kingdomRepo from '../../data/db/repositories/kingdomRepo';
 import * as adaptiveChallengeRepo from '../../data/db/repositories/adaptiveChallengeRepo';
 import * as challengeSessionRepo from '../../data/db/repositories/challengeSessionRepo';
@@ -23,6 +22,8 @@ export function parseProgressJson(raw: string | null): {
   timer?: InlineTimerProgress;
   partialNote?: string;
   forgeLevelAtAccept?: number;
+  proofChallengeSessionId?: string;
+  proofCombatVictoryId?: string;
 } {
   if (!raw) return {};
   try {
@@ -31,6 +32,51 @@ export function parseProgressJson(raw: string | null): {
   } catch {
     return {};
   }
+}
+
+export function renewableProofSatisfied(
+  template: RenewableQuestTemplate,
+  progress: QuestProgress,
+  status: 'offered' | 'active' | 'ready' | 'claimed' | 'failed',
+): boolean {
+  if (status === 'ready') return true;
+  if (status !== 'active') return false;
+  if (template.proof === 'breathing_timer' || template.proof === 'inline_challenge') {
+    return progress.target === 1 && progress.current >= 1;
+  }
+  return progress.current >= progress.target && progress.target > 0;
+}
+
+async function consumedCombatVictoryIds(db: Conn, excludeInstanceId?: string): Promise<Set<string>> {
+  const rows = await db.getAllAsync<{ id: string; progress_json: string | null }>(
+    `SELECT id, progress_json FROM renewable_quest_instances WHERE status IN ('active', 'ready', 'claimed')`,
+  );
+  const used = new Set<string>();
+  for (const row of rows) {
+    if (excludeInstanceId && row.id === excludeInstanceId) continue;
+    const meta = parseProgressJson(row.progress_json);
+    if (meta.proofCombatVictoryId) used.add(meta.proofCombatVictoryId);
+  }
+  return used;
+}
+
+function challengeSessionProofComplete(
+  session: Awaited<ReturnType<typeof challengeSessionRepo.getById>>,
+  template: RenewableQuestTemplate,
+  acceptedAt: string,
+): boolean {
+  if (!session || session.state !== 'completed') return false;
+  if (session.startedUtc < acceptedAt) return false;
+  if (template.challengeType && session.type !== template.challengeType) return false;
+  const target = template.targetDurationSec ?? 600;
+  if (session.type === 'sport') {
+    const confirmed = Number(session.userConfirmedDurationSec ?? session.durationSec);
+    return confirmed >= target;
+  }
+  if (session.type === 'no_screen') {
+    return session.durationSec >= target;
+  }
+  return false;
 }
 
 export async function evaluateRenewableProof(
@@ -100,48 +146,70 @@ export async function evaluateRenewableProof(
     }
     case 'inline_challenge': {
       const target = template.targetDurationSec ?? 600;
-      if (challengeSessionId) {
-        const session = await challengeSessionRepo.getById(db, challengeSessionId);
-        if (session && session.state === 'running') {
-          const elapsed = displayElapsedSec(session);
-          return {
-            current: Math.min(target, elapsed),
-            target,
-            label: `${Math.min(target, elapsed)} / ${target} s`,
-          };
-        }
-        if (session?.state === 'completed' && session.startedUtc >= acceptedAt) {
-          const confirmed =
-            session.type === 'sport'
-              ? Number(session.userConfirmedDurationSec ?? session.durationSec)
-              : session.durationSec;
-          if (session.type === 'no_screen' || (session.type === 'sport' && confirmed > 0)) {
-            if (confirmed >= target) {
-              return { current: 1, target: 1, label: `1 / 1 défi (${target}s)` };
-            }
-          }
-        }
+      const boundId = challengeSessionId ?? progressMeta.proofChallengeSessionId ?? null;
+      if (!boundId) {
+        const partial = progressMeta.timer?.partialBestSec ?? 0;
+        return {
+          current: 0,
+          target: 1,
+          label: partial > 0 ? `${partial} / ${target} s (partiel)` : '0 / 1 défi',
+        };
       }
-      const pseudo: QuestDef = {
-        id: template.id,
-        title: template.title,
-        description: '',
-        objective: template.objective,
-        rewardGold: template.rewardGold,
-        proof: 'time_challenge',
-      };
-      const base = await evaluateQuestProof(db, pseudo, acceptedAt);
-      if (base.current >= 1) return { current: 1, target: 1, label: '1 / 1 défi validé' };
+      const session = await challengeSessionRepo.getById(db, boundId);
+      if (!session) {
+        return { current: 0, target: 1, label: '0 / 1 défi' };
+      }
+      if (session.state === 'running') {
+        if (session.startedUtc < acceptedAt) {
+          return { current: 0, target: 1, label: '0 / 1 défi' };
+        }
+        if (template.challengeType && session.type !== template.challengeType) {
+          return { current: 0, target: 1, label: '0 / 1 défi' };
+        }
+        const elapsed = displayElapsedSec(session);
+        return {
+          current: Math.min(target, elapsed),
+          target,
+          label: `${Math.min(target, elapsed)} / ${target} s`,
+        };
+      }
+      if (challengeSessionProofComplete(session, template, acceptedAt)) {
+        return { current: 1, target: 1, label: `1 / 1 défi (${target}s)` };
+      }
       const partial = progressMeta.timer?.partialBestSec ?? 0;
       return {
         current: 0,
         target: 1,
-        label: partial > 0 ? `${partial} / ${target} s (partiel)` : '0 / 1 défi',
+        label:
+          session.state === 'interrupted'
+            ? '0 / 1 défi (interrompu)'
+            : partial > 0
+              ? `${partial} / ${target} s (partiel)`
+              : '0 / 1 défi',
       };
     }
     case 'combat_victory': {
       const enemy = template.targetEnemyId ?? 'thorn_guardian';
-      const n = await combatVictoryRepo.countVictoriesAfter(db, enemy, acceptedAt);
+      const boundVictory = progressMeta.proofCombatVictoryId;
+      if (boundVictory) {
+        const row = await db.getFirstAsync<{ outcome: string }>(
+          `SELECT outcome FROM combat_victory_log WHERE id = ? AND enemy_id = ? AND fought_at >= ?`,
+          boundVictory,
+          enemy,
+          acceptedAt,
+        );
+        if (row?.outcome === 'victory') {
+          return { current: 1, target: 1, label: '1 / 1 victoire' };
+        }
+      }
+      const consumed = await consumedCombatVictoryIds(db);
+      const victories = await db.getAllAsync<{ id: string; fought_at: string }>(
+        `SELECT id, fought_at FROM combat_victory_log WHERE enemy_id = ? AND outcome = 'victory' AND fought_at >= ? ORDER BY fought_at ASC`,
+        enemy,
+        acceptedAt,
+      );
+      const free = victories.filter((v) => !consumed.has(v.id));
+      const n = free.length;
       return { current: Math.min(1, n), target: 1, label: n ? '1 / 1 victoire' : '0 / 1 victoire' };
     }
     case 'forge_upgrade': {

@@ -25,7 +25,7 @@ export interface WhatToDoNow {
 }
 
 function entryHasRunningTimer(e: RenewableBoardEntry): boolean {
-  return e.timerRunning || (e.state === 'active' && (e.template.proof === 'breathing_timer' || e.template.proof === 'inline_challenge'));
+  return e.timerRunning;
 }
 
 export async function buildWhatToDoNow(

@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { Body, Button, Chip, Screen, TabScrollView } from '@/src/design-system/ui';
 import { FantasyPanel } from '@/src/design-system/FantasyPanel';
 import { QuestBoardCard } from '@/src/design-system/QuestBoardCard';
@@ -50,6 +50,7 @@ import { useAppStore } from '@/src/state/appStore';
 
 export default function AdventureScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ tab?: string; instanceId?: string; openCombat?: string; openForge?: string }>();
   const refresh = useAppStore((s) => s.refresh);
   const [view, setView] = useState<Awaited<ReturnType<typeof getAdventureView>> | null>(null);
   const [kingdom, setKingdom] = useState<Awaited<ReturnType<typeof getKingdomView>> | null>(null);
@@ -60,6 +61,7 @@ export default function AdventureScreen() {
   const [renewableBoard, setRenewableBoard] = useState<RenewableQuestBoard | null>(null);
   const [questCategory, setQuestCategory] = useState<RenewableQuestCategory | 'toutes'>('toutes');
   const [winFlashId, setWinFlashId] = useState<string | null>(null);
+  const [highlightId, setHighlightId] = useState<string | null>(null);
   const [questMsg, setQuestMsg] = useState<string | null>(null);
   const [questBusy, setQuestBusy] = useState(false);
   const [kingdomBusy, setKingdomBusy] = useState(false);
@@ -145,6 +147,29 @@ export default function AdventureScreen() {
     }, [load]),
   );
 
+  useFocusEffect(
+    useCallback(() => {
+      const tabParam = params.tab;
+      if (tabParam === 'quests' || tabParam === 'royaume' || tabParam === 'trail') {
+        setTab(tabParam);
+      }
+      if (params.openCombat === '1') {
+        setCombatOpen(true);
+        setForgeOpen(false);
+      }
+      if (params.openForge === '1') {
+        setForgeOpen(true);
+        setCombatOpen(false);
+      }
+      if (params.instanceId) {
+        setHighlightId(String(params.instanceId));
+        const t = setTimeout(() => setHighlightId(null), 4000);
+        return () => clearTimeout(t);
+      }
+      return undefined;
+    }, [params.tab, params.instanceId, params.openCombat, params.openForge]),
+  );
+
   if (!view || !board || !kingdom || !renewableBoard) {
     return (
       <Screen>
@@ -200,6 +225,7 @@ export default function AdventureScreen() {
         entry={e}
         busy={questBusy}
         winFlash={winFlashId === e.instanceId}
+        highlighted={highlightId === e.instanceId}
         acceptDisabledReason={
           renewFull ? `Carnet renouvelable plein (${renewableBoard.maxAccepted}).` : null
         }

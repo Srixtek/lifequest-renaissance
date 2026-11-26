@@ -18,17 +18,18 @@ import { createId } from '../../utils/id';
 import {
   evaluateRenewableProof,
   parseProgressJson,
+  renewableProofSatisfied,
   type InlineTimerProgress,
 } from './renewableQuestEvidence';
 import type { QuestProgress } from './questEvidence';
 import {
-  closeChallengeSession,
-  completeScreenChallenge,
-  completeSportChallenge,
+  closeChallengeSessionOnConn,
+  completeScreenChallengeOnConn,
+  completeSportChallengeOnConn,
   displayElapsedSec,
-  startChallengeSession,
+  startChallengeSessionOnConn,
 } from './challengeService';
-import { recordBreathingSession } from './toolsService';
+import { recordBreathingSessionOnConn } from './vapeBreathingSession';
 import * as challengeSessionRepo from '../../data/db/repositories/challengeSessionRepo';
 
 type Conn = Db | SqlRunner;
@@ -44,6 +45,7 @@ export interface RenewableBoardEntry {
   claimedAt: string | null;
   challengeSessionId: string | null;
   timerRunning: boolean;
+  inlineTimer: { startedUtc: string; targetSec: number } | null;
 }
 
 export interface RenewableQuestBoard {
@@ -94,8 +96,28 @@ async function pickTemplateForCategory(
   return eligible[0] ?? null;
 }
 
-async function ensureOffers(db: Conn): Promise<void> {
+function occupiedTemplateIds(rows: renewableQuestRepo.RenewableQuestRow[]): Set<string> {
+  return new Set(
+    rows.filter((r) => r.status === 'offered' || r.status === 'active' || r.status === 'ready').map((r) => r.templateId),
+  );
+}
+
+async function dedupeOfferedInstances(db: Conn): Promise<void> {
   const rows = await renewableQuestRepo.listInstances(db);
+  const seen = new Set<string>();
+  for (const r of rows.filter((row) => row.status === 'offered')) {
+    if (seen.has(r.templateId)) {
+      await db.runAsync(`DELETE FROM renewable_quest_instances WHERE id = ? AND status = 'offered'`, r.id);
+    } else {
+      seen.add(r.templateId);
+    }
+  }
+}
+
+async function ensureOffers(db: Conn): Promise<void> {
+  await dedupeOfferedInstances(db);
+  const rows = await renewableQuestRepo.listInstances(db);
+  const occupied = occupiedTemplateIds(rows);
   const openOffers = rows.filter((r) => r.status === 'offered');
   const byCategory = new Map<string, number>();
   for (const r of openOffers) {
@@ -106,8 +128,9 @@ async function ensureOffers(db: Conn): Promise<void> {
   for (const cat of categories) {
     if ((byCategory.get(cat) ?? 0) >= 1) continue;
     const tmpl = await pickTemplateForCategory(db, cat);
-    if (!tmpl) continue;
+    if (!tmpl || occupied.has(tmpl.id)) continue;
     await renewableQuestRepo.insertOffered(db, createId('rnw'), tmpl.id, cat, tmpl.rewardGold, now);
+    occupied.add(tmpl.id);
   }
 }
 
@@ -143,14 +166,15 @@ export async function getRenewableQuestBoard(db: Conn): Promise<RenewableQuestBo
       ? await evaluateRenewableProof(db, template, acceptedAt, row.progressJson, row.challengeSessionId)
       : { current: 0, target: 1, label: 'Pas commencée' };
     let state: RenewableBoardState = row.status;
-    if (row.status === 'active' && progress.current >= progress.target && progress.target > 0) {
-      const meets =
-        template.proof === 'breathing_timer' || template.proof === 'inline_challenge'
-          ? progress.label.includes('1 / 1')
-          : progress.current >= 1;
-      if (meets) state = 'ready';
+    if (row.status === 'active' && renewableProofSatisfied(template, progress, row.status)) {
+      state = 'ready';
     }
     const meta = parseProgressJson(row.progressJson);
+    const timerRunning = meta.timer?.state === 'running';
+    const inlineTimer =
+      timerRunning && meta.timer
+        ? { startedUtc: meta.timer.startedUtc, targetSec: meta.timer.targetSec }
+        : null;
     entries.push({
       instanceId: row.id,
       template,
@@ -159,18 +183,18 @@ export async function getRenewableQuestBoard(db: Conn): Promise<RenewableQuestBo
       acceptedAt: row.acceptedAt,
       claimedAt: row.claimedAt,
       challengeSessionId: row.challengeSessionId,
-      timerRunning: meta.timer?.state === 'running',
+      timerRunning,
+      inlineTimer,
     });
   }
 
   const priority = (e: RenewableBoardEntry) => {
     if (e.state === 'ready') return 0;
-    if (e.state === 'active') return 1;
-    if (e.state === 'offered') return 2;
-    return 3;
+    if (e.state === 'offered') return 1;
+    return 2;
   };
   const recommended = [...entries]
-    .filter((e) => e.state !== 'claimed' && e.state !== 'failed')
+    .filter((e) => e.state === 'offered' || e.state === 'ready')
     .sort((a, b) => priority(a) - priority(b))
     .slice(0, MAX_RECOMMENDED_OFFERS);
 
@@ -220,16 +244,34 @@ export async function refreshRenewableState(db: Db, instanceId: string, now = ne
     const template = RENEWABLE_BY_ID[row.templateId];
     if (!template) return;
     const progress = await evaluateRenewableProof(tx, template, row.acceptedAt, row.progressJson, row.challengeSessionId);
-    const ready =
-      template.proof === 'habit_declaration' ||
-      template.proof === 'combat_victory' ||
-      template.proof === 'forge_upgrade' ||
-      template.proof === 'adaptive_vape_complete'
-        ? progress.current >= 1
-        : progress.label.includes('1 / 1');
-    if (ready) {
-      await renewableQuestRepo.markReady(tx, instanceId, row.progressJson, now.toISOString());
+    if (!renewableProofSatisfied(template, progress, row.status)) return;
+    let progressJson = row.progressJson;
+    if (template.proof === 'combat_victory' && progress.current >= 1) {
+      const meta = parseProgressJson(row.progressJson);
+      if (!meta.proofCombatVictoryId) {
+        const enemy = template.targetEnemyId ?? 'thorn_guardian';
+        const victories = await tx.getAllAsync<{ id: string }>(
+          `SELECT id FROM combat_victory_log WHERE enemy_id = ? AND outcome = 'victory' AND fought_at >= ? ORDER BY fought_at ASC`,
+          enemy,
+          row.acceptedAt,
+        );
+        const consumed = new Set<string>();
+        const others = await tx.getAllAsync<{ progress_json: string | null }>(
+          `SELECT progress_json FROM renewable_quest_instances WHERE id != ? AND status IN ('active','ready','claimed')`,
+          instanceId,
+        );
+        for (const o of others) {
+          const m = parseProgressJson(o.progress_json);
+          if (m.proofCombatVictoryId) consumed.add(m.proofCombatVictoryId);
+        }
+        const pick = victories.find((v) => !consumed.has(v.id));
+        if (pick) {
+          meta.proofCombatVictoryId = pick.id;
+          progressJson = JSON.stringify(meta);
+        }
+      }
     }
+    await renewableQuestRepo.markReady(tx, instanceId, progressJson, now.toISOString());
   });
 }
 
@@ -262,7 +304,7 @@ export async function startRenewableTimer(
     }
 
     if (template.proof === 'inline_challenge' && template.challengeType) {
-      const started = await startChallengeSession(tx, template.challengeType, template.targetDurationSec ?? null);
+      const started = await startChallengeSessionOnConn(tx, template.challengeType, template.targetDurationSec ?? null);
       if (!started.ok) {
         result = { ok: false, message: 'Un autre chrono du même type est déjà en cours ailleurs.' };
         return;
@@ -290,7 +332,7 @@ export async function failRenewableTimer(db: Db, instanceId: string, now = new D
     if (row.challengeSessionId) {
       const session = await challengeSessionRepo.getById(tx, row.challengeSessionId);
       if (session?.state === 'running') {
-        await closeChallengeSession(tx, row.challengeSessionId, 'interrupted', { requireSportConfirm: false });
+        await closeChallengeSessionOnConn(tx, row.challengeSessionId, 'interrupted', { requireSportConfirm: false });
       }
     }
     const meta = parseProgressJson(row.progressJson);
@@ -300,7 +342,10 @@ export async function failRenewableTimer(db: Db, instanceId: string, now = new D
     const tmpl = RENEWABLE_BY_ID[row.templateId];
   const replacement = tmpl ? await pickTemplateForCategory(tx, tmpl.category, row.templateId) : null;
     if (replacement) {
-      await renewableQuestRepo.insertOffered(tx, createId('rnw'), replacement.id, replacement.category, replacement.rewardGold, at);
+      const rows = await renewableQuestRepo.listInstances(tx);
+      if (!occupiedTemplateIds(rows).has(replacement.id)) {
+        await renewableQuestRepo.insertOffered(tx, createId('rnw'), replacement.id, replacement.category, replacement.rewardGold, at);
+      }
     }
     result = { ok: true, message: 'Tentative enregistrée — pas de récompense. Une nouvelle quête peut apparaître.' };
   });
@@ -341,10 +386,11 @@ export async function succeedRenewableTimer(db: Db, instanceId: string, now = ne
         result = { ok: false, message: `Encore ${target - elapsed} s avant la cible.` };
         return;
       }
-      await recordBreathingSession(tx, target, true);
+      await recordBreathingSessionOnConn(tx, target, true);
       if (timer) timer.state = 'stopped';
-      await renewableQuestRepo.updateProgress(tx, instanceId, JSON.stringify({ ...meta, timer }), null, at);
-      await renewableQuestRepo.markReady(tx, instanceId, row.progressJson, at);
+      const readyJson = JSON.stringify({ ...meta, timer });
+      await renewableQuestRepo.updateProgress(tx, instanceId, readyJson, null, at);
+      await renewableQuestRepo.markReady(tx, instanceId, readyJson, at);
       result = { ok: true, message: 'Souffle validé — récompense prête !' };
       return;
     }
@@ -360,14 +406,32 @@ export async function succeedRenewableTimer(db: Db, instanceId: string, now = ne
         result = { ok: false, message: `Encore ${target - elapsed} s.` };
         return;
       }
+      const confirmedMinutes = target / 60;
       if (session.type === 'sport') {
-        await completeSportChallenge(tx, session.id, target);
+        const done = await completeSportChallengeOnConn(tx, session.id, confirmedMinutes);
+        if (!done.ok) {
+          result = { ok: false, message: 'Impossible de valider le défi sport.' };
+          return;
+        }
       } else if (session.type === 'no_screen') {
-        await completeScreenChallenge(tx, session.id, true);
+        const done = await completeScreenChallengeOnConn(tx, session.id, true);
+        if (!done.ok) {
+          result = { ok: false, message: 'Impossible de valider le défi sans écran.' };
+          return;
+        }
       } else {
-        await closeChallengeSession(tx, session.id, 'completed', { requireSportConfirm: false });
+        const done = await closeChallengeSessionOnConn(tx, session.id, 'completed', { requireSportConfirm: false });
+        if (!done.ok) {
+          result = { ok: false, message: 'Impossible de clôturer le chrono.' };
+          return;
+        }
       }
-      await renewableQuestRepo.markReady(tx, instanceId, row.progressJson, at);
+      const meta = parseProgressJson(row.progressJson);
+      if (meta.timer) meta.timer.state = 'stopped';
+      meta.proofChallengeSessionId = session.id;
+      const readyJson = JSON.stringify(meta);
+      await renewableQuestRepo.updateProgress(tx, instanceId, readyJson, session.id, at);
+      await renewableQuestRepo.markReady(tx, instanceId, readyJson, at);
       result = { ok: true, message: 'Défi validé — tu peux réclamer l\'or !' };
     }
   });
@@ -414,7 +478,7 @@ export async function partialStopRenewableTimer(
       const session = await challengeSessionRepo.getById(tx, row.challengeSessionId);
       if (session?.state === 'running') {
         const elapsed = displayElapsedSec(session);
-        await closeChallengeSession(tx, session.id, 'interrupted', { requireSportConfirm: false });
+        await closeChallengeSessionOnConn(tx, session.id, 'interrupted', { requireSportConfirm: false });
         if (!meta.timer) {
           meta.timer = {
             kind: 'challenge',
@@ -436,9 +500,10 @@ export async function partialStopRenewableTimer(
 
 async function spawnRenewal(tx: Conn, category: string, excludeTemplateId: string, at: string): Promise<void> {
   const next = await pickTemplateForCategory(tx, category as RenewableQuestTemplate['category'], excludeTemplateId);
-  if (next) {
-    await renewableQuestRepo.insertOffered(tx, createId('rnw'), next.id, next.category, next.rewardGold, at);
-  }
+  if (!next) return;
+  const rows = await renewableQuestRepo.listInstances(tx);
+  if (occupiedTemplateIds(rows).has(next.id)) return;
+  await renewableQuestRepo.insertOffered(tx, createId('rnw'), next.id, next.category, next.rewardGold, at);
 }
 
 export async function claimRenewableQuest(db: Db, instanceId: string, now = new Date()): Promise<{ ok: boolean; message: string; gold?: number; balance?: number }> {
@@ -449,6 +514,10 @@ export async function claimRenewableQuest(db: Db, instanceId: string, now = new 
       result = { ok: false, message: 'Récompense déjà réclamée.' };
       return;
     }
+    if (row?.status === 'failed') {
+      result = { ok: false, message: 'Quête échouée — aucune récompense.' };
+      return;
+    }
     if (!row?.acceptedAt) {
       result = { ok: false, message: 'Quête non acceptée.' };
       return;
@@ -456,14 +525,7 @@ export async function claimRenewableQuest(db: Db, instanceId: string, now = new 
     const template = RENEWABLE_BY_ID[row.templateId];
     if (!template) return;
     const progress = await evaluateRenewableProof(tx, template, row.acceptedAt, row.progressJson, row.challengeSessionId);
-    const ready =
-      template.proof === 'habit_declaration' ||
-      template.proof === 'combat_victory' ||
-      template.proof === 'forge_upgrade' ||
-      template.proof === 'adaptive_vape_complete'
-        ? progress.current >= 1
-        : progress.label.includes('1 / 1');
-    if (!ready && row.status !== 'ready') {
+    if (row.status !== 'ready' && !renewableProofSatisfied(template, progress, row.status)) {
       result = { ok: false, message: 'Objectif pas encore atteint.' };
       return;
     }
@@ -502,7 +564,7 @@ export async function abandonRenewableQuest(db: Db, instanceId: string, now = ne
     if (row.challengeSessionId) {
       const session = await challengeSessionRepo.getById(tx, row.challengeSessionId);
       if (session?.state === 'running') {
-        await closeChallengeSession(tx, row.challengeSessionId, 'interrupted', { requireSportConfirm: false });
+        await closeChallengeSessionOnConn(tx, row.challengeSessionId, 'interrupted', { requireSportConfirm: false });
       }
     }
     const at = now.toISOString();
