@@ -85,10 +85,13 @@ export default function AdventureScreen() {
     } catch (err) {
       setKingdomMsg(friendlyDbError(err));
     } finally {
-      await refresh();
-      await load();
-      kingdomLock.current = false;
-      setKingdomBusy(false);
+      try {
+        await refresh();
+        await load();
+      } finally {
+        kingdomLock.current = false;
+        setKingdomBusy(false);
+      }
     }
   };
 
