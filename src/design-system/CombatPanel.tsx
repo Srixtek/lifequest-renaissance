@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { Image, ScrollView, StyleSheet, Text, View, type ImageSourcePropType } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { EnemyId } from '../data/content/kingdom';
 import { SKILL_CONCENTRATION_COST, CONCENTRATION_MAX } from '../data/content/kingdom';
-import { enemySprite, heroSprite } from '../data/content/kingdomAssets';
 import { enemyDisplayName } from '../domain/combat/combatEngine';
+import { CombatArenaArt } from './art/CombatArenaArt';
+import { CombatFighterArt } from './art/CombatFighterArt';
 import type { CombatSnapshot } from '../domain/combat/combatEngine';
 import type { ClassId } from '../domain/models/types';
 import { Button, Body } from './ui';
@@ -24,6 +25,8 @@ type Props = {
   onSkill: () => void;
   onLeave?: () => void;
 };
+
+const COMBAT_STAGE_HEIGHT = pixelDim(3.6) + spacing.xl + 28;
 
 const CLASS_LABELS: Record<ClassId, string> = {
   rodeur: 'Rôdeur',
@@ -79,23 +82,15 @@ export function CombatPanel({
   return (
     <FantasyPanel>
       <View style={[styles.stage, flash === 'hit' && !reduceMotion && styles.flashHit, flash === 'defend' && !reduceMotion && styles.flashDefend]}>
-        <View style={styles.floorRow} pointerEvents="none">
-          {Array.from({ length: 10 }).map((_, i) => (
-            <Image
-              key={`floor-${i}`}
-              source={require('../../assets/kingdom/kenney/terrain_path.png')}
-              style={styles.floorTile}
-            />
-          ))}
-        </View>
-        <Image
-          source={require('../../assets/kingdom/kenney/combat_backdrop.png')}
-          style={styles.backdrop}
-        />
+        <CombatArenaArt height={COMBAT_STAGE_HEIGHT} />
         <View style={styles.fighters}>
-          <FighterSprite source={heroSprite(classId)} label={CLASS_LABELS[classId]} side="left" />
+          <FighterSlot label={CLASS_LABELS[classId]} side="left">
+            <CombatFighterArt kind="hero" classId={classId} size={pixelDim(3.6)} pulse={!combat.outcome} />
+          </FighterSlot>
           <Text style={styles.vs}>vs</Text>
-          <FighterSprite source={enemySprite(enemyId)} label={enemyDisplayName(enemyId)} side="right" />
+          <FighterSlot label={enemyDisplayName(enemyId)} side="right">
+            <CombatFighterArt kind="enemy" enemyId={enemyId} size={pixelDim(3.6)} pulse={!combat.outcome} />
+          </FighterSlot>
         </View>
         <HpBar inScene current={combat.heroHp} max={combat.heroHpMax} tint={colors.emerald} style={styles.heroHp} />
         <HpBar inScene current={combat.enemyHp} max={combat.enemyHpMax} tint={colors.warn} style={styles.enemyHp} />
@@ -153,19 +148,18 @@ export function CombatPanel({
   );
 }
 
-function FighterSprite({
-  source,
+function FighterSlot({
   label,
   side,
+  children,
 }: {
-  source: ImageSourcePropType;
   label: string;
   side: 'left' | 'right';
+  children: React.ReactNode;
 }) {
-  const size = pixelDim(3.6);
   return (
     <View style={[styles.fighter, side === 'right' && styles.fighterEnd]}>
-      <Image source={source} style={{ width: size, height: size }} />
+      {children}
       <Text style={styles.fighterLabel} numberOfLines={2}>
         {label}
       </Text>
@@ -230,28 +224,12 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     overflow: 'hidden',
     marginBottom: spacing.sm,
-    minHeight: pixelDim(3.6) + spacing.xl + 28,
+    minHeight: COMBAT_STAGE_HEIGHT,
     borderWidth: 1,
     borderColor: colors.line,
   },
   flashHit: { borderColor: colors.warn },
   flashDefend: { borderColor: colors.emeraldDim },
-  floorRow: {
-    ...StyleSheet.absoluteFill,
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    justifyContent: 'center',
-    paddingBottom: 2,
-  },
-  floorTile: { width: pixelDim(0.55), height: pixelDim(0.55), opacity: 0.55 },
-  backdrop: {
-    position: 'absolute',
-    top: spacing.sm,
-    left: '12%',
-    width: pixelDim(5.5),
-    height: pixelDim(2.75),
-    opacity: 0.22,
-  },
   telegraphRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',

@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from 'react';
 import { ScrollView, View, Text, StyleSheet } from 'react-native';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Body, Button, Chip, Screen, Title } from '@/src/design-system/ui';
 import { FantasyPanel } from '@/src/design-system/FantasyPanel';
@@ -34,6 +34,7 @@ import { MIST_WOLF_ID, THORN_GUARDIAN_ID, type EnemyId } from '@/src/data/conten
 import { useAppStore } from '@/src/state/appStore';
 
 export default function AdventureScreen() {
+  const router = useRouter();
   const insets = useSafeAreaInsets();
   const refresh = useAppStore((s) => s.refresh);
   const [view, setView] = useState<Awaited<ReturnType<typeof getAdventureView>> | null>(null);
@@ -115,7 +116,9 @@ export default function AdventureScreen() {
       }
       return;
     }
-    if (zone === 'camp') setKingdomMsg('Le camp tient bon. Les routes habituelles restent intactes.');
+    if (zone === 'camp') {
+      router.push('/(tabs)/camp');
+    }
   };
 
   useFocusEffect(
@@ -161,7 +164,7 @@ export default function AdventureScreen() {
         }}
       >
         <Title>Royaume</Title>
-        <Body muted>Le bastion d&apos;Eloria — forge, combat et quêtes du carnet.</Body>
+        <Body muted>Le bastion d&apos;Eloria — touche une zone sur la carte, ou ouvre les quêtes ci-dessous.</Body>
         <View style={styles.tabs}>
           <Chip label="Bastion" selected={tab === 'royaume'} onPress={() => setTab('royaume')} />
           <Chip label="Quêtes" selected={tab === 'quests'} onPress={() => setTab('quests')} />
