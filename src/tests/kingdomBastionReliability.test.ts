@@ -13,6 +13,7 @@ import {
   performCombatAction,
   startCombat,
 } from '../domain/services/kingdomService';
+import { skillAffordable } from '../domain/combat/combatEngine';
 import { exportBackupPayload, importBackupPayload } from '../domain/services/backupService';
 import { FIRST_WIN_ITEM_ID, HERO_BASE_DAMAGE } from '../data/content/kingdom';
 import type { ClassId } from '../domain/models/types';
@@ -52,9 +53,15 @@ async function setClass(t: TestDb, classId: ClassId) {
 }
 
 function pickOffensiveAction(classId: ClassId, view: Awaited<ReturnType<typeof getKingdomView>>) {
-  if (view.combat.skillCooldown > 0) return 'attack' as const;
-  if (classId === 'rodeur' || classId === 'artisan') return 'skill' as const;
-  if (classId === 'sage' && view.combat.heroHp < view.combat.heroHpMax * 0.55) return 'skill' as const;
+  const c = view.combat;
+  if (c.enemyIntent === 'heavy') {
+    if (classId === 'gardien' && skillAffordable(c)) return 'skill' as const;
+    return 'defend' as const;
+  }
+  if (classId === 'sage' && c.heroHp < c.heroHpMax * 0.6 && skillAffordable(c)) return 'skill' as const;
+  if ((classId === 'rodeur' || classId === 'artisan') && skillAffordable(c)) return 'skill' as const;
+  if (c.concentration === 1 && c.enemyIntent === 'brace') return 'attack' as const;
+  if (c.concentration < 2 && c.enemyIntent !== 'normal') return 'defend' as const;
   return 'attack' as const;
 }
 
@@ -183,7 +190,7 @@ suite('006A-R — fiabilisation bastion', () => {
 
   test('équilibrage : défense réduit la frappe lourde même tour', () => {
     const stats = { baseDamage: HERO_BASE_DAMAGE, forgeLevel: 0, classId: 'rodeur' as const };
-    const base = { ...createInitialCombat(0), enemyIntent: 'power' as const };
+    const base = { ...createInitialCombat(0), enemyIntent: 'heavy' as const };
     const defended = applyPlayerAction(base, 'defend', stats);
     const reckless = applyPlayerAction(base, 'attack', stats);
     expect(defended.heroHp).toBeGreaterThan(reckless.heroHp);

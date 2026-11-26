@@ -1,8 +1,10 @@
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Image, StyleSheet, Text, View } from 'react-native';
 import { FantasyPanel } from './FantasyPanel';
 import { ProgressBar } from './ProgressBar';
+import { CollapsibleSection } from './CollapsibleSection';
 import { Button } from './ui';
+import { KENNEY, QUEST_EMBLEM } from '../data/content/kingdomAssets';
 import { colors, radius, spacing, typography } from './theme';
 import type { QuestBoardEntry, QuestBoardState } from '@/src/domain/services/questService';
 
@@ -12,6 +14,11 @@ const BADGE: Record<QuestBoardState, { label: string; color: string }> = {
   ready: { label: 'Prête', color: colors.gold },
   claimed: { label: 'Terminée', color: colors.success },
 };
+
+function goalOneLine(objective: string): string {
+  const line = objective.split(/[.!?]/)[0]?.trim() ?? objective;
+  return line.length > 72 ? `${line.slice(0, 69)}…` : line;
+}
 
 export function QuestBoardCard({
   entry,
@@ -30,22 +37,30 @@ export function QuestBoardCard({
 }) {
   const { def, state, progress } = entry;
   const badge = BADGE[state];
+  const emblem = QUEST_EMBLEM[def.id] ?? KENNEY.buildingCamp;
+
   return (
     <FantasyPanel accent={state === 'ready'}>
       <View style={styles.header}>
-        <Text style={styles.title}>{def.title}</Text>
+        <Image source={emblem} style={styles.emblem} />
+        <View style={{ flex: 1 }}>
+          <Text style={styles.title}>{def.title}</Text>
+          <Text style={styles.goalLine}>{goalOneLine(def.objective)}</Text>
+        </View>
         <View style={[styles.badge, { borderColor: badge.color }]}>
           <Text style={[styles.badgeText, { color: badge.color }]}>{badge.label}</Text>
         </View>
       </View>
-      <Text style={styles.desc}>{def.description}</Text>
-      <Text style={styles.objective}>Objectif : {def.objective}</Text>
       {state === 'accepted' || state === 'ready' ? (
         <ProgressBar progress={progress.current / progress.target} label={progress.label} height={8} />
       ) : null}
       <Text style={styles.reward}>
-        {state === 'claimed' ? `Récompense reçue : ${def.rewardGold} or` : `Récompense : ${def.rewardGold} or`}
+        {state === 'claimed' ? `Récompense reçue : ${def.rewardGold} or` : `+${def.rewardGold} or`}
       </Text>
+      <CollapsibleSection title="Détails de la quête" hint="Voir le contexte">
+        <Text style={styles.desc}>{def.description}</Text>
+        <Text style={styles.objective}>Objectif complet : {def.objective}</Text>
+      </CollapsibleSection>
       {state === 'available' ? (
         <>
           <Button label="Accepter la quête" onPress={onAccept} disabled={busy || !!acceptDisabledReason} />
@@ -61,12 +76,14 @@ export function QuestBoardCard({
 }
 
 const styles = StyleSheet.create({
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
-  title: { ...typography.subtitle, color: colors.ink, flex: 1 },
+  header: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
+  emblem: { width: 40, height: 40, marginTop: 2 },
+  title: { ...typography.subtitle, color: colors.ink },
+  goalLine: { ...typography.caption, color: colors.muted, marginTop: 4 },
   badge: { borderWidth: 1, borderRadius: radius.sm, paddingHorizontal: 8, paddingVertical: 4 },
   badgeText: { fontSize: 11, fontWeight: '600' },
-  desc: { ...typography.body, color: colors.ink, marginTop: spacing.sm },
-  objective: { ...typography.caption, color: colors.muted, marginTop: spacing.sm, marginBottom: spacing.sm },
+  desc: { ...typography.body, color: colors.ink },
+  objective: { ...typography.caption, color: colors.muted, marginTop: spacing.sm },
   reward: { ...typography.caption, color: colors.gold, fontWeight: '700', marginTop: spacing.sm },
   hint: { ...typography.caption, color: colors.muted, marginTop: spacing.xs },
 });

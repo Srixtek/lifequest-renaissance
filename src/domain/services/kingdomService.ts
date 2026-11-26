@@ -1,6 +1,7 @@
 import type { Db } from '../../data/db/client';
 import type { SqlRunner } from '../../data/db/sqlRunner';
 import {
+  ENEMY_DEFS,
   FIRST_WIN_ITEM_ID,
   FORGE_BUILDING_ID,
   FORGE_DAMAGE_PER_LEVEL,
@@ -8,6 +9,8 @@ import {
   FORGE_MAX_LEVEL,
   FORGE_UPGRADE_COST,
   HERO_BASE_DAMAGE,
+  THORN_GUARDIAN_ID,
+  type EnemyId,
 } from '../../data/content/kingdom';
 import * as kingdomRepo from '../../data/db/repositories/kingdomRepo';
 import * as profileRepo from '../../data/db/repositories/profileRepo';
@@ -15,6 +18,8 @@ import * as rpgRepo from '../../data/db/repositories/rpgRepo';
 import {
   applyPlayerAction,
   createInitialCombat,
+  enemyDisplayName,
+  skillAffordable,
   type CombatAction,
   previewForgeDamageBonus,
 } from '../combat/combatEngine';
@@ -49,6 +54,7 @@ export async function getKingdomView(db: Conn) {
     classId,
     canUpgrade: !!(nextLevel && upgradeCost !== null && gold >= upgradeCost),
     hasTrophy: combat.firstWinRewarded,
+    enemies: Object.values(ENEMY_DEFS).map((e) => ({ id: e.id, name: e.name, baseHp: e.baseHp })),
   };
 }
 
@@ -125,16 +131,24 @@ async function resolveProfileClass(db: Conn): Promise<ClassId> {
   return (p?.classId ?? 'rodeur') as ClassId;
 }
 
-export async function startCombat(db: Db): Promise<{ ok: boolean; message: string }> {
+function resolveEnemyId(id?: string): EnemyId {
+  return id === 'mist_wolf' ? 'mist_wolf' : THORN_GUARDIAN_ID;
+}
+
+export async function startCombat(db: Db, enemyId?: EnemyId): Promise<{ ok: boolean; message: string }> {
+  const target = resolveEnemyId(enemyId);
   let result = { ok: false, message: 'Combat indisponible.' };
   await db.withExclusiveTransactionAsync(async (tx) => {
     const stored = await kingdomRepo.getCombatState(tx);
     if (stored.active && !stored.outcome) {
-      result = { ok: true, message: 'Reprise du combat en cours.' };
+      result = {
+        ok: true,
+        message: `Reprise du combat contre ${enemyDisplayName(stored.enemyId)}.`,
+      };
       return;
     }
     const forge = await kingdomRepo.getForgeLevel(tx);
-    const snap = createInitialCombat(forge.level);
+    const snap = createInitialCombat(forge.level, target);
     const now = new Date().toISOString();
     await kingdomRepo.saveCombatState(tx, {
       ...snap,
@@ -142,7 +156,7 @@ export async function startCombat(db: Db): Promise<{ ok: boolean; message: strin
       firstWinRewarded: stored.firstWinRewarded,
       updatedAt: now,
     });
-    result = { ok: true, message: "Le Gardien des Ronces t'attend." };
+    result = { ok: true, message: `${enemyDisplayName(target)} t'attend à l'arène.` };
   });
   return result;
 }
@@ -166,6 +180,10 @@ export async function performCombatAction(
         code: 'stale',
         message: 'Tour déjà résolu — le combat a avancé, réessaie.',
       };
+      return;
+    }
+    if (action === 'skill' && !skillAffordable(stored)) {
+      result = { ok: false, code: 'no_concentration', message: 'Concentration insuffisante pour la compétence.' };
       return;
     }
     const forge = await kingdomRepo.getForgeLevel(tx);
@@ -209,7 +227,7 @@ export async function dismissCombat(db: Db): Promise<void> {
     if (!stored.outcome) return;
     const now = new Date().toISOString();
     await kingdomRepo.saveCombatState(tx, {
-      ...createInitialCombat((await kingdomRepo.getForgeLevel(tx)).level),
+      ...createInitialCombat((await kingdomRepo.getForgeLevel(tx)).level, stored.enemyId),
       active: false,
       firstWinRewarded: stored.firstWinRewarded,
       updatedAt: now,

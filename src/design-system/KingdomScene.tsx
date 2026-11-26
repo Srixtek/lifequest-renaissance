@@ -1,6 +1,7 @@
 import React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
-import Svg, { Circle, Defs, LinearGradient, Path, Rect, Stop } from 'react-native-svg';
+import { Image, Pressable, StyleSheet, Text, View, type ImageSourcePropType } from 'react-native';
+import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
+import { KENNEY } from '../data/content/kingdomAssets';
 import { colors, spacing, typography } from './theme';
 
 export type KingdomZone = 'forge' | 'combat' | 'forest' | 'camp';
@@ -11,62 +12,61 @@ type Props = {
   height?: number;
 };
 
-export function KingdomScene({ forgeLevel, onZone, height = 220 }: Props) {
+const PIXEL = 3;
+
+export function KingdomScene({ forgeLevel, onZone, height = 240 }: Props) {
   const forgeGlow = forgeLevel >= 2 ? colors.goldBright : forgeLevel >= 1 ? colors.gold : colors.muted;
-  const emberOpacity = forgeLevel >= 2 ? 1 : forgeLevel >= 1 ? 0.75 : 0.35;
-  const chimneyH = forgeLevel >= 2 ? 10 : forgeLevel >= 1 ? 6 : 0;
+  const emberOpacity = forgeLevel >= 2 ? 1 : forgeLevel >= 1 ? 0.85 : 0.4;
+
   return (
     <View style={[styles.wrap, { height }]}>
-      <Svg width="100%" height={height} viewBox="0 0 360 220">
+      <View style={[StyleSheet.absoluteFill, styles.groundRow]}>
+        {Array.from({ length: 24 }).map((_, i) => (
+          <Image key={`g${i}`} source={KENNEY.terrainGrass} style={styles.grassTile} resizeMode="stretch" />
+        ))}
+      </View>
+      <Svg width="100%" height={height} style={StyleSheet.absoluteFill} pointerEvents="none">
         <Defs>
           <LinearGradient id="skyB" x1="0" y1="0" x2="0" y2="1">
             <Stop offset="0" stopColor="#12262A" />
             <Stop offset="1" stopColor={colors.bg} />
           </LinearGradient>
         </Defs>
-        <Rect x="0" y="0" width="360" height="220" fill="url(#skyB)" />
-        <Path d="M0 175 Q90 165 180 172 T360 175 L360 220 L0 220 Z" fill="#0B1816" />
-        {/* forêt inactive */}
-        <Path d="M10 175 L28 78 L46 175 Z" fill="#14342E" opacity={0.85} />
-        <Path d="M300 175 L320 70 L340 175 Z" fill="#163832" opacity={0.85} />
-        <Rect x="0" y="150" width="95" height="70" fill="transparent" />
-        {/* camp central */}
-        <Path d="M140 175 L180 118 L220 175 Z" fill="#2A5A4A" stroke={colors.goldDim} strokeWidth="0.8" />
-        <Rect x="172" y="150" width="16" height="24" rx="2" fill={colors.copperDim} />
-        <Circle cx="180" cy="142" r="10" fill={colors.ember} opacity={0.5} />
-        {/* forge : 0=ruine, 1=feu, 2=cheminée renforcée */}
-        <Rect x="228" y="138" width="44" height="36" rx="4" fill="#4A3728" stroke={forgeGlow} strokeWidth={forgeLevel >= 2 ? 2 : 1.4} />
-        <Rect x="238" y="148" width="24" height="16" rx="2" fill={forgeLevel > 0 ? colors.ember : '#2A1810'} />
+        <Rect x="0" y="0" width="100%" height={height * 0.55} fill="url(#skyB)" />
+      </Svg>
+
+      <Sprite source={KENNEY.terrainTree} style={{ left: '4%', bottom: height * 0.28, opacity: 0.9 }} />
+      <Sprite source={KENNEY.terrainTree} style={{ right: '6%', bottom: height * 0.3, opacity: 0.85 }} />
+
+      <Sprite source={KENNEY.buildingCamp} style={{ left: '38%', bottom: height * 0.22 }} scale={4} />
+      <View style={[styles.forgeCluster, { right: '14%', bottom: height * 0.2 }]}>
+        <Sprite source={KENNEY.buildingWall} scale={3.5} />
+        <Sprite source={KENNEY.forgeAnvil} scale={3.2} style={{ marginTop: -8 * PIXEL }} />
         {forgeLevel >= 1 ? (
-          <Circle cx="250" cy="156" r="4" fill={colors.ember} opacity={emberOpacity} />
-        ) : null}
-        {chimneyH > 0 ? (
-          <Rect
-            x={forgeLevel >= 2 ? 234 : 242}
-            y={138 - chimneyH}
-            width={forgeLevel >= 2 ? 32 : 16}
-            height={chimneyH}
-            rx={2}
-            fill={forgeLevel >= 2 ? colors.copper : colors.copperDim}
+          <View
+            style={[
+              styles.ember,
+              { opacity: emberOpacity, borderColor: forgeGlow, backgroundColor: colors.ember },
+            ]}
           />
         ) : null}
-        {/* arène */}
-        <EllipseArena />
-        <Path
-          d="M24 175 Q55 168 76 175"
-          stroke={colors.emeraldDim}
-          strokeWidth="2"
-          fill="none"
-          opacity={0.35}
-        />
-      </Svg>
+        {forgeLevel >= 2 ? <Sprite source={KENNEY.buildingWall} scale={2.5} style={{ marginTop: -6 * PIXEL }} /> : null}
+      </View>
+
+      <View style={[styles.arenaCluster, { left: '18%', bottom: height * 0.18 }]}>
+        <Image source={KENNEY.arenaFloor} style={{ width: 16 * PIXEL * 4, height: 16 * PIXEL * 2 }} />
+        <Sprite source={KENNEY.terrainPath} style={{ position: 'absolute', bottom: -4 }} scale={2.5} />
+      </View>
+
+      <View style={styles.forestSlot}>
+        <Text style={styles.lockedTag}>Forêt — bientôt</Text>
+      </View>
+
       <Pressable
         style={[styles.zone, styles.forest]}
         onPress={() => onZone('forest')}
         accessibilityLabel="Forêt — bientôt"
-      >
-        <Text style={styles.zoneTag}>Forêt</Text>
-      </Pressable>
+      />
       <Pressable style={[styles.zone, styles.camp]} onPress={() => onZone('camp')} accessibilityLabel="Camp">
         <Text style={styles.zoneTag}>Camp</Text>
       </Pressable>
@@ -80,32 +80,61 @@ export function KingdomScene({ forgeLevel, onZone, height = 220 }: Props) {
   );
 }
 
-function EllipseArena() {
-  return (
-    <>
-      <Path
-        d="M68 160 Q120 145 148 160 Q120 175 68 160 Z"
-        fill="#1A3530"
-        stroke={colors.goldDim}
-        strokeWidth="0.7"
-      />
-      <Circle cx="108" cy="157" r="5" fill={colors.copperDim} />
-    </>
-  );
+function Sprite({
+  source,
+  style,
+  scale = 3,
+}: {
+  source: ImageSourcePropType;
+  style?: object;
+  scale?: number;
+}) {
+  const s = 16 * PIXEL * (scale / 3);
+  return <Image source={source} style={[{ width: s, height: s }, style]} />;
 }
 
 const styles = StyleSheet.create({
-  wrap: { width: '100%', borderRadius: 16, overflow: 'hidden', marginBottom: spacing.md, position: 'relative' },
+  wrap: {
+    width: '100%',
+    borderRadius: 16,
+    overflow: 'hidden',
+    marginBottom: spacing.md,
+    position: 'relative',
+    backgroundColor: '#0B1816',
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  groundRow: { flexDirection: 'row', alignItems: 'flex-end', bottom: 0, height: 48 },
+  grassTile: { flex: 1, height: 24, opacity: 0.9 },
+  forgeCluster: { position: 'absolute', alignItems: 'center' },
+  arenaCluster: { position: 'absolute', alignItems: 'center' },
+  ember: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginTop: -6,
+    borderWidth: 1,
+  },
+  forestSlot: {
+    position: 'absolute',
+    left: 8,
+    top: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: 'rgba(11,24,22,0.75)',
+    borderRadius: 8,
+  },
+  lockedTag: { ...typography.caption, color: colors.muted },
   zone: {
     position: 'absolute',
     justifyContent: 'flex-end',
     paddingBottom: 6,
     alignItems: 'center',
   },
-  forest: { left: '0%', top: '35%', width: '18%', height: '45%' },
-  combat: { left: '16%', top: '40%', width: '26%', height: '42%' },
-  camp: { left: '38%', top: '38%', width: '28%', height: '48%' },
-  forge: { left: '61%', top: '40%', width: '22%', height: '42%' },
+  forest: { left: '0%', top: '35%', width: '18%', height: '48%' },
+  combat: { left: '14%', top: '38%', width: '28%', height: '48%' },
+  camp: { left: '36%', top: '36%', width: '30%', height: '52%' },
+  forge: { left: '62%', top: '38%', width: '24%', height: '48%' },
   zoneTag: { ...typography.caption, color: colors.muted, fontWeight: '700' },
   zoneActive: { color: colors.gold },
   zoneCombat: { color: colors.goldBright },

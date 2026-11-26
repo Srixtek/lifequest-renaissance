@@ -1,5 +1,12 @@
 import type { Db } from '../client';
 import type { SqlRunner } from '../sqlRunner';
+import {
+  CONCENTRATION_START,
+  MIST_WOLF_ID,
+  THORN_GUARDIAN_ID,
+  normalizeEnemyIntent,
+  type EnemyId,
+} from '../../../data/content/kingdom';
 import type { CombatOutcome, CombatSnapshot, EnemyIntent } from '../../../domain/combat/combatEngine';
 
 type Conn = Db | SqlRunner;
@@ -15,6 +22,11 @@ export interface StoredCombat extends CombatSnapshot {
   updatedAt: string;
 }
 
+function parseEnemyId(raw: unknown): EnemyId {
+  const s = String(raw ?? THORN_GUARDIAN_ID);
+  return s === MIST_WOLF_ID ? MIST_WOLF_ID : THORN_GUARDIAN_ID;
+}
+
 function rowToCombat(r: Record<string, unknown>): StoredCombat {
   return {
     active: !!r.active,
@@ -23,9 +35,11 @@ function rowToCombat(r: Record<string, unknown>): StoredCombat {
     enemyHp: Number(r.enemy_hp),
     enemyHpMax: Number(r.enemy_hp_max),
     turnNumber: Number(r.turn_number),
-    enemyIntent: String(r.enemy_intent) as EnemyIntent,
+    enemyIntent: normalizeEnemyIntent(String(r.enemy_intent)) as EnemyIntent,
+    enemyIntentIndex: Number(r.enemy_intent_index ?? 0),
+    enemyId: parseEnemyId(r.enemy_id),
+    concentration: Number(r.concentration ?? CONCENTRATION_START),
     heroGuarding: !!r.hero_guarding,
-    skillCooldown: Number(r.skill_cooldown),
     outcome: (r.outcome as CombatOutcome) ?? null,
     log: JSON.parse(String(r.log_json || '[]')),
     firstWinRewarded: !!r.first_win_rewarded,
@@ -46,8 +60,9 @@ export async function ensureKingdomDefaults(db: Conn): Promise<void> {
     await db.runAsync(
       `INSERT INTO kingdom_combat (
         id, active, hero_hp, hero_hp_max, enemy_hp, enemy_hp_max,
-        turn_number, enemy_intent, hero_guarding, skill_cooldown, outcome, log_json, first_win_rewarded, updated_at
-      ) VALUES (1, 0, 0, 0, 0, 0, 0, 'normal', 0, 0, NULL, '[]', 0, ?)`,
+        turn_number, enemy_intent, enemy_intent_index, enemy_id, concentration,
+        hero_guarding, skill_cooldown, outcome, log_json, first_win_rewarded, updated_at
+      ) VALUES (1, 0, 0, 0, 0, 0, 0, 'normal', 0, 'thorn_guardian', 1, 0, 0, NULL, '[]', 0, ?)`,
       new Date().toISOString(),
     );
   }
@@ -79,8 +94,8 @@ export async function saveCombatState(db: Conn, state: StoredCombat): Promise<vo
   await db.runAsync(
     `UPDATE kingdom_combat SET
       active = ?, hero_hp = ?, hero_hp_max = ?, enemy_hp = ?, enemy_hp_max = ?,
-      turn_number = ?, enemy_intent = ?, hero_guarding = ?, skill_cooldown = ?,
-      outcome = ?, log_json = ?, first_win_rewarded = ?, updated_at = ?
+      turn_number = ?, enemy_intent = ?, enemy_intent_index = ?, enemy_id = ?, concentration = ?,
+      hero_guarding = ?, outcome = ?, log_json = ?, first_win_rewarded = ?, updated_at = ?
      WHERE id = 1`,
     state.active ? 1 : 0,
     state.heroHp,
@@ -89,8 +104,10 @@ export async function saveCombatState(db: Conn, state: StoredCombat): Promise<vo
     state.enemyHpMax,
     state.turnNumber,
     state.enemyIntent,
+    state.enemyIntentIndex,
+    state.enemyId,
+    state.concentration,
     state.heroGuarding ? 1 : 0,
-    state.skillCooldown,
     state.outcome,
     JSON.stringify(state.log),
     state.firstWinRewarded ? 1 : 0,

@@ -42,6 +42,17 @@ suite('006A — bastion royaume', () => {
   });
   afterEach(() => t.close());
 
+  test('migration 009 : combat v2 (concentration, enemy_id, intentions)', async () => {
+    const c = await t.db.getAllAsync<{ name: string }>(`PRAGMA table_info(kingdom_combat)`);
+    expect(c.map((x) => x.name)).toEqual(
+      expect.arrayContaining(['concentration', 'enemy_id', 'enemy_intent_index']),
+    );
+    const row = await t.db.getFirstAsync<{ version: number }>(
+      `SELECT version FROM schema_migrations WHERE version = 9`,
+    );
+    expect(row?.version).toBe(9);
+  });
+
   test('migration 008 : tables royaume présentes', async () => {
     const b = await t.db.getAllAsync<{ name: string }>(`PRAGMA table_info(kingdom_buildings)`);
     const c = await t.db.getAllAsync<{ name: string }>(`PRAGMA table_info(kingdom_combat)`);
@@ -109,7 +120,7 @@ suite('006A — bastion royaume', () => {
 
     let safety = 0;
     while (view.combat.active && !view.combat.outcome && safety < 20) {
-      const act = view.combat.skillCooldown <= 0 ? 'skill' : 'attack';
+      const act = view.combat.concentration >= 2 ? 'skill' : 'defend';
       await performCombatAction(t.db, act, view.combat.turnNumber, view.combat.updatedAt);
       view = await getKingdomView(t.db);
       safety += 1;
