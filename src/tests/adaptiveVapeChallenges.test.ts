@@ -187,6 +187,21 @@ sqliteSuite('adaptive vape — persistance node:sqlite', () => {
     expect(dash2.record?.bestDurationSec).toBe(best);
   });
 
+  test('record 30 min puis arrêt sans renseigner — pas de record ni or', async () => {
+    const start = await startVapeAdaptiveChallenge(t.db, 'record');
+    if (!start.ok) return;
+    await ageChallengeSession(t.db, start.attempt.challengeSessionId!, 30 * 60);
+    const close = await closeVapeAdaptiveChallenge(t.db, start.attempt.id, 'unknown');
+    expect(close.ok).toBe(true);
+    if (close.ok) {
+      expect(close.goldGranted).toBe(false);
+      expect(close.attempt.outcome).toBe('unknown');
+    }
+    const dash = await getVapeAdaptiveDashboard(t.db);
+    expect(dash.record?.bestDurationSec ?? 0).toBe(0);
+    expect(await rpgRepo.getGoldBalance(t.db)).toBe(0);
+  });
+
   test('arrêt immédiat record — aucune récompense', async () => {
     const start = await startVapeAdaptiveChallenge(t.db, 'record');
     if (!start.ok) return;

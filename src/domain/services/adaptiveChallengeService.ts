@@ -321,18 +321,16 @@ export async function closeVapeAdaptiveChallenge(
       return;
     }
 
-    if (attempt.format === 'record' && durationSec > 0) {
+    const mayUpdateRecord =
+      durationSec > 0 &&
+      mode !== 'unknown' &&
+      (attempt.format === 'record'
+        ? mode === 'completed' || mode === 'vaped'
+        : success && attempt.format === 'interval');
+    if (mayUpdateRecord) {
       await adaptiveRepo.upsertRecordIfBetter(tx, {
         habitCategory: VAPE_HABIT_CATEGORY,
-        format: 'record',
-        bestDurationSec: durationSec,
-        attemptId,
-        achievedAt: ended,
-      });
-    } else if (success && attempt.format === 'interval') {
-      await adaptiveRepo.upsertRecordIfBetter(tx, {
-        habitCategory: VAPE_HABIT_CATEGORY,
-        format: 'interval',
+        format: attempt.format === 'record' ? 'record' : 'interval',
         bestDurationSec: durationSec,
         attemptId,
         achievedAt: ended,
@@ -342,9 +340,9 @@ export async function closeVapeAdaptiveChallenge(
     const updated = (await adaptiveRepo.getAttemptById(tx, attemptId))!;
     const tierMessage = await applyTierAfterClose(tx, updated);
     let goldGranted = false;
-    if (attempt.format === 'record') {
+    if (attempt.format === 'record' && mode !== 'unknown') {
       goldGranted = await maybeGrantRecordMilestoneGold(tx, durationSec);
-    } else {
+    } else if (attempt.format !== 'record') {
       goldGranted = await maybeGrantTierGold(tx, updated, success);
     }
     result = { ok: true, attempt: updated, tierMessage, goldGranted };

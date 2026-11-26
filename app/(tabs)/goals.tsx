@@ -443,7 +443,7 @@ export default function GoalsScreen() {
                     onChangeText={(t) => setDraftValues((d) => ({ ...d, [g.id]: t }))}
                     placeholder={g.unit ? `Quantité (${g.unit})` : 'Valeur'}
                     keyboardType="decimal-pad"
-                    accessibilityLabel={`Saisie ${g.title}`}
+                    accessibilityLabel={`Saisie ${displayTitle}`}
                   />
                   <Button
                     label="Enregistrer la valeur"

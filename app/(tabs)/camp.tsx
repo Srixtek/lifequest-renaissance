@@ -16,6 +16,7 @@ import { getDb } from '@/src/data/db/client';
 import { upgradeCamp } from '@/src/domain/services/adventureService';
 import { XP_PER_LEVEL } from '@/src/domain/rules/xp';
 import type { GoalDefinition, TrackingStatus } from '@/src/domain/models/types';
+import { publicGoalTitle } from '@/src/domain/content/goalDisplay';
 import { useState } from 'react';
 
 function todayStatusLabel(
@@ -121,6 +122,7 @@ export default function CampScreen() {
               const status = (tr?.status ?? 'unknown') as TrackingStatus;
               const tpl = GOAL_TEMPLATES.find((t) => t.id === g.templateId);
               const category = tpl?.category;
+              const displayTitle = publicGoalTitle(g);
               return (
                 <Pressable
                   key={g.id}
@@ -128,10 +130,10 @@ export default function CampScreen() {
                   accessibilityRole="button"
                 >
                   <QuestCard
-                    title={tpl ? CATEGORY_SHORT[category!] ?? g.title : g.title}
+                    title={tpl ? CATEGORY_SHORT[category!] ?? displayTitle : displayTitle}
                     category={category}
                     status={status}
-                    targetLabel={g.title}
+                    targetLabel={displayTitle}
                     valueLabel={todayStatusLabel(g, status, tr?.value != null)}
                   />
                 </Pressable>
