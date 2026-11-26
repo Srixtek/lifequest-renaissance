@@ -42,6 +42,17 @@ suite('006A — bastion royaume', () => {
   });
   afterEach(() => t.close());
 
+  test('migration 009 : combat v2 (concentration, enemy_id, intentions)', async () => {
+    const c = await t.db.getAllAsync<{ name: string }>(`PRAGMA table_info(kingdom_combat)`);
+    expect(c.map((x) => x.name)).toEqual(
+      expect.arrayContaining(['concentration', 'enemy_id', 'enemy_intent_index']),
+    );
+    const row = await t.db.getFirstAsync<{ version: number }>(
+      `SELECT version FROM schema_migrations WHERE version = 9`,
+    );
+    expect(row?.version).toBe(9);
+  });
+
   test('migration 008 : tables royaume présentes', async () => {
     const b = await t.db.getAllAsync<{ name: string }>(`PRAGMA table_info(kingdom_buildings)`);
     const c = await t.db.getAllAsync<{ name: string }>(`PRAGMA table_info(kingdom_combat)`);
@@ -53,15 +64,15 @@ suite('006A — bastion royaume', () => {
     expect(row?.version).toBe(8);
   });
 
-  test('moteur combat pur : déterministe, victoire en 4–8 tours (attaque seule)', () => {
+  test('moteur combat pur : attaque seule mène à la défaite (tactique requise)', () => {
     let state = createInitialCombat(0);
     const stats = { baseDamage: HERO_BASE_DAMAGE, forgeLevel: 0, classId: 'rodeur' as const };
-  let turns = 0;
+    let turns = 0;
     while (!state.outcome && turns < 12) {
       state = applyPlayerAction(state, 'attack', stats);
       turns += 1;
     }
-    expect(state.outcome).toBe('victory');
+    expect(state.outcome).toBe('defeat');
     expect(turns).toBeGreaterThanOrEqual(4);
     expect(turns).toBeLessThanOrEqual(8);
   });
@@ -109,7 +120,7 @@ suite('006A — bastion royaume', () => {
 
     let safety = 0;
     while (view.combat.active && !view.combat.outcome && safety < 20) {
-      const act = view.combat.skillCooldown <= 0 ? 'skill' : 'attack';
+      const act = view.combat.concentration >= 2 ? 'skill' : 'defend';
       await performCombatAction(t.db, act, view.combat.turnNumber, view.combat.updatedAt);
       view = await getKingdomView(t.db);
       safety += 1;

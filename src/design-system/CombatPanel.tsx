@@ -1,13 +1,15 @@
-import React from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
-import Svg, { Circle, Path } from 'react-native-svg';
-import { THORN_GUARDIAN_NAME } from '../data/content/kingdom';
+import React, { useEffect, useState } from 'react';
+import { Image, ScrollView, StyleSheet, Text, View, type ImageSourcePropType } from 'react-native';
+import type { EnemyId } from '../data/content/kingdom';
+import { SKILL_CONCENTRATION_COST, CONCENTRATION_MAX } from '../data/content/kingdom';
+import { enemySprite, heroSprite } from '../data/content/kingdomAssets';
+import { enemyDisplayName } from '../domain/combat/combatEngine';
 import type { CombatSnapshot } from '../domain/combat/combatEngine';
 import type { ClassId } from '../domain/models/types';
 import { Button, Body } from './ui';
 import { colors, spacing, typography } from './theme';
 import { FantasyPanel } from './FantasyPanel';
-import { ClassSymbol } from './icons';
+import { useReduceMotion } from './useReduceMotion';
 
 type Props = {
   combat: CombatSnapshot & { active: boolean; updatedAt: string };
@@ -15,6 +17,7 @@ type Props = {
   skillLabel: string;
   skillReady: boolean;
   busy: boolean;
+  reduceMotion?: boolean;
   onAttack: () => void;
   onDefend: () => void;
   onSkill: () => void;
@@ -28,58 +31,108 @@ const CLASS_LABELS: Record<ClassId, string> = {
   artisan: 'Artisan',
 };
 
+function intentCopy(intent: CombatSnapshot['enemyIntent']) {
+  switch (intent) {
+    case 'heavy':
+      return { label: 'Frappe lourde imminente', tint: colors.warn };
+    case 'brace':
+      return { label: 'Ennemi en défense / préparation', tint: colors.emerald };
+    default:
+      return { label: 'Attaque normale imminente', tint: colors.muted };
+  }
+}
+
 export function CombatPanel({
   combat,
   classId,
   skillLabel,
   skillReady,
   busy,
+  reduceMotion: reduceProp,
   onAttack,
   onDefend,
   onSkill,
   onLeave,
 }: Props) {
-  const intent =
-    combat.enemyIntent === 'power' ? 'Frappe lourde imminente' : 'Attaque normale imminente';
-  const intentTint = combat.enemyIntent === 'power' ? colors.warn : colors.muted;
+  const reduceHook = useReduceMotion();
+  const reduceMotion = reduceProp ?? reduceHook;
+  const intent = intentCopy(combat.enemyIntent);
+  const [flash, setFlash] = useState<'hit' | 'defend' | null>(null);
+  const enemyId = (combat.enemyId ?? 'thorn_guardian') as EnemyId;
+
+  useEffect(() => {
+    const last = combat.log[combat.log.length - 1] ?? '';
+    if (reduceMotion || combat.outcome) return;
+    if (last.includes('frappe') || last.includes('dégâts')) {
+      setFlash('hit');
+      const t = setTimeout(() => setFlash(null), 220);
+      return () => clearTimeout(t);
+    }
+    if (last.includes('défense')) {
+      setFlash('defend');
+      const t = setTimeout(() => setFlash(null), 220);
+      return () => clearTimeout(t);
+    }
+  }, [combat.log.length, combat.updatedAt, reduceMotion, combat.outcome]);
+
   return (
     <FantasyPanel>
-      <View style={styles.fighters}>
-        <View style={styles.fighter}>
-          <ClassSymbol classId={classId} size={28} />
-          <Text style={styles.fighterLabel}>{CLASS_LABELS[classId]}</Text>
+      <View style={[styles.stage, flash === 'hit' && !reduceMotion && styles.flashHit, flash === 'defend' && !reduceMotion && styles.flashDefend]}>
+        <View style={styles.floorRow} pointerEvents="none">
+          {Array.from({ length: 12 }).map((_, i) => (
+            <Image
+              key={`floor-${i}`}
+              source={require('../../assets/kingdom/kenney/terrain_path.png')}
+              style={styles.floorTile}
+            />
+          ))}
         </View>
-        <Text style={styles.vs}>vs</Text>
-        <View style={styles.fighter}>
-          <GuardianIcon />
-          <Text style={styles.fighterLabel} numberOfLines={1}>
-            Gardien
-          </Text>
+        <Image source={require('../../assets/kingdom/kenney/combat_backdrop.png')} style={styles.backdrop} resizeMode="cover" />
+        <View style={styles.fighters}>
+          <FighterSprite source={heroSprite(classId)} label={CLASS_LABELS[classId]} side="left" />
+          <Text style={styles.vs}>vs</Text>
+          <FighterSprite source={enemySprite(enemyId)} label={enemyDisplayName(enemyId)} side="right" />
         </View>
+        <HpBar inScene current={combat.heroHp} max={combat.heroHpMax} tint={colors.emerald} style={styles.heroHp} />
+        <HpBar inScene current={combat.enemyHp} max={combat.enemyHpMax} tint={colors.warn} style={styles.enemyHp} />
       </View>
-      <Text style={styles.title}>{THORN_GUARDIAN_NAME}</Text>
-      <View style={[styles.intentBadge, { borderColor: intentTint }]}>
-        <Text style={[styles.intentText, { color: intentTint }]}>{intent}</Text>
+
+      <View style={styles.telegraphRow}>
+        <Text style={styles.title}>{enemyDisplayName(enemyId)}</Text>
+        <ConcentrationMeter value={combat.concentration} max={CONCENTRATION_MAX} />
+      </View>
+      <View style={[styles.intentBadge, { borderColor: intent.tint }]}>
+        <Text style={[styles.intentText, { color: intent.tint }]}>{intent.label}</Text>
       </View>
       <View style={styles.bars}>
         <HpBar label="Héros" current={combat.heroHp} max={combat.heroHpMax} tint={colors.emerald} />
         <HpBar label="Ennemi" current={combat.enemyHp} max={combat.enemyHpMax} tint={colors.warn} />
       </View>
-      <Body muted>Tour {combat.turnNumber}</Body>
+      <View style={styles.turnLine}>
+        <Body muted>Tour {combat.turnNumber} · compétence : {SKILL_CONCENTRATION_COST} concentration</Body>
+      </View>
       {combat.outcome ? (
-        <Text style={combat.outcome === 'victory' ? styles.win : styles.lose}>
-          {combat.outcome === 'victory' ? 'Victoire' : 'Défaite'}
-        </Text>
+        <View style={[styles.outcome, combat.outcome === 'victory' ? styles.winStage : styles.loseStage]}>
+          <Text style={combat.outcome === 'victory' ? styles.win : styles.lose}>
+            {combat.outcome === 'victory' ? 'Victoire' : 'Défaite'}
+          </Text>
+        </View>
       ) : (
         <View style={styles.actions}>
-          <Button label="Attaquer" onPress={onAttack} disabled={busy} />
-          <Button label="Défendre" variant="ghost" onPress={onDefend} disabled={busy} />
-          <Button
-            label={skillReady ? skillLabel : `${skillLabel} (${combat.skillCooldown}t)`}
-            variant="ghost"
-            onPress={onSkill}
-            disabled={busy || !skillReady}
-          />
+          <View style={styles.actionRow}>
+            <View style={styles.actionPrimary}>
+              <Button label="Attaquer" onPress={onAttack} disabled={busy} />
+            </View>
+            <View style={styles.actionSide}>
+              <Button label="Défendre" variant="ghost" onPress={onDefend} disabled={busy} />
+              <Button
+                label={skillReady ? skillLabel : `${skillLabel} (${SKILL_CONCENTRATION_COST})`}
+                variant="ghost"
+                onPress={onSkill}
+                disabled={busy || !skillReady}
+              />
+            </View>
+          </View>
         </View>
       )}
       {combat.outcome && onLeave ? (
@@ -96,23 +149,72 @@ export function CombatPanel({
   );
 }
 
+function FighterSprite({
+  source,
+  label,
+  side,
+}: {
+  source: ImageSourcePropType;
+  label: string;
+  side: 'left' | 'right';
+}) {
+  const scale = 4.5;
+  const size = Math.round(16 * 3 * (scale / 3));
+  return (
+    <View style={[styles.fighter, side === 'right' && { alignItems: 'flex-end' }]}>
+      <Image source={source} style={{ width: size, height: size }} />
+      <Text style={styles.fighterLabel} numberOfLines={2}>
+        {label}
+      </Text>
+    </View>
+  );
+}
+
+function ConcentrationMeter({ value, max }: { value: number; max: number }) {
+  return (
+    <View style={styles.concRow}>
+      <Text style={styles.concLabel}>Concentration</Text>
+      <View style={styles.concDots}>
+        {Array.from({ length: max }).map((_, i) => (
+          <View key={i} style={[styles.concDot, i < value && styles.concDotOn]} />
+        ))}
+      </View>
+    </View>
+  );
+}
+
 function HpBar({
   label,
   current,
   max,
   tint,
+  inScene,
+  style,
 }: {
-  label: string;
+  label?: string;
   current: number;
   max: number;
   tint: string;
+  inScene?: boolean;
+  style?: object;
 }) {
   const pct = max > 0 ? Math.min(1, current / max) : 0;
+  if (inScene) {
+    return (
+      <View style={[styles.sceneHp, style]}>
+        <View style={styles.hpTrackThin}>
+          <View style={[styles.hpFill, { width: `${pct * 100}%`, backgroundColor: tint }]} />
+        </View>
+      </View>
+    );
+  }
   return (
     <View style={styles.hpWrap}>
-      <Text style={styles.hpLabel}>
-        {label} {current}/{max}
-      </Text>
+      {label ? (
+        <Text style={styles.hpLabel}>
+          {label} {current}/{max}
+        </Text>
+      ) : null}
       <View style={styles.hpTrack}>
         <View style={[styles.hpFill, { width: `${pct * 100}%`, backgroundColor: tint }]} />
       </View>
@@ -120,21 +222,52 @@ function HpBar({
   );
 }
 
-function GuardianIcon() {
-  return (
-    <Svg width={28} height={28} viewBox="0 0 24 24">
-      <Circle cx="12" cy="8" r="5" fill={colors.warn} opacity={0.85} />
-      <Path d="M6 20 Q12 14 18 20" stroke={colors.emeraldDim} strokeWidth={1.5} fill={colors.mist} />
-      <Path d="M8 12 L10 16 M16 12 L14 16" stroke={colors.copper} strokeWidth={1.2} />
-    </Svg>
-  );
-}
-
 const styles = StyleSheet.create({
-  fighters: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.xs },
-  fighter: { alignItems: 'center', gap: 2, flex: 1 },
-  fighterLabel: { ...typography.caption, color: colors.muted, fontSize: 10 },
-  vs: { ...typography.caption, color: colors.line, marginHorizontal: spacing.xs },
+  stage: {
+    borderRadius: 12,
+    overflow: 'hidden',
+    marginBottom: spacing.sm,
+    minHeight: 172,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  flashHit: { borderColor: colors.warn },
+  flashDefend: { borderColor: colors.emeraldDim },
+  floorRow: {
+    ...StyleSheet.absoluteFill,
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    paddingBottom: 2,
+  },
+  floorTile: { width: 28, height: 28, opacity: 0.55, resizeMode: 'stretch' as const },
+  backdrop: { ...StyleSheet.absoluteFill, opacity: 0.22 },
+  telegraphRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+    marginBottom: spacing.xs,
+  },
+  turnLine: { marginBottom: spacing.xs },
+  actionRow: { flexDirection: 'row', gap: spacing.sm, alignItems: 'stretch' },
+  actionPrimary: { flex: 1.1 },
+  actionSide: { flex: 1, gap: spacing.xs },
+  fighters: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.lg,
+  },
+  fighter: { alignItems: 'center', gap: 4, flex: 1 },
+  fighterLabel: { ...typography.caption, color: colors.muted, fontSize: 10, textAlign: 'center' },
+  vs: { ...typography.caption, color: colors.line, marginHorizontal: spacing.xs, marginBottom: 24 },
+  sceneHp: { position: 'absolute', width: '38%' },
+  heroHp: { left: spacing.sm, bottom: spacing.sm },
+  enemyHp: { right: spacing.sm, bottom: spacing.sm },
+  hpTrackThin: { height: 5, borderRadius: 3, backgroundColor: colors.line, overflow: 'hidden' },
   intentBadge: {
     borderWidth: 1,
     borderRadius: 8,
@@ -144,7 +277,12 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
   },
   intentText: { ...typography.caption, fontWeight: '700' },
-  title: { ...typography.subtitle, color: colors.gold, marginBottom: spacing.sm },
+  concRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  concLabel: { ...typography.caption, color: colors.muted },
+  concDots: { flexDirection: 'row', gap: 6 },
+  concDot: { width: 10, height: 10, borderRadius: 5, borderWidth: 1, borderColor: colors.line },
+  concDotOn: { backgroundColor: colors.gold, borderColor: colors.goldBright },
+  title: { ...typography.subtitle, color: colors.gold, marginBottom: spacing.xs },
   bars: { gap: spacing.sm, marginBottom: spacing.sm },
   hpWrap: { marginBottom: 4 },
   hpLabel: { ...typography.caption, color: colors.muted, marginBottom: 2 },
@@ -155,9 +293,12 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   hpFill: { height: '100%', borderRadius: 4 },
-  actions: { gap: spacing.xs, marginVertical: spacing.sm },
+  actions: { marginVertical: spacing.sm },
   log: { maxHeight: 120, marginTop: spacing.sm },
   logLine: { ...typography.caption, color: colors.muted, marginBottom: 2 },
-  win: { color: colors.goldBright, fontWeight: '700' },
-  lose: { color: colors.warn },
+  outcome: { borderRadius: 8, padding: spacing.sm, marginVertical: spacing.sm },
+  winStage: { backgroundColor: 'rgba(212,175,55,0.12)' },
+  loseStage: { backgroundColor: 'rgba(180,90,70,0.12)' },
+  win: { color: colors.goldBright, fontWeight: '700', textAlign: 'center' },
+  lose: { color: colors.warn, textAlign: 'center' },
 });

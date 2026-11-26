@@ -27,6 +27,8 @@ import {
   skillNameForClass,
   startCombat,
 } from '@/src/domain/services/kingdomService';
+import { skillAffordable } from '@/src/domain/combat/combatEngine';
+import { MIST_WOLF_ID, THORN_GUARDIAN_ID, type EnemyId } from '@/src/data/content/kingdom';
 import { useAppStore } from '@/src/state/appStore';
 
 export default function AdventureScreen() {
@@ -43,6 +45,7 @@ export default function AdventureScreen() {
   const [forgeOpen, setForgeOpen] = useState(false);
   const [forgeConfirm, setForgeConfirm] = useState(false);
   const [combatOpen, setCombatOpen] = useState(false);
+  const [pickedEnemy, setPickedEnemy] = useState<EnemyId>(THORN_GUARDIAN_ID);
   const questLock = useRef(false);
   const kingdomLock = useRef(false);
 
@@ -105,10 +108,7 @@ export default function AdventureScreen() {
       setCombatOpen(true);
       setForgeOpen(false);
       if (!kingdom?.combat.active && !kingdom?.combat.outcome) {
-        await runKingdom(async (db) => {
-          const r = await startCombat(db);
-          return { message: r.message };
-        });
+        setPickedEnemy((kingdom?.combat.enemyId as EnemyId) ?? THORN_GUARDIAN_ID);
       }
       return;
     }
@@ -147,7 +147,7 @@ export default function AdventureScreen() {
       />
     ));
 
-  const skillReady = kingdom.combat.skillCooldown <= 0;
+  const skillReady = skillAffordable(kingdom.combat);
 
   return (
     <Screen>
@@ -250,16 +250,29 @@ export default function AdventureScreen() {
                 }
               />
             ) : combatOpen ? (
-              <Button
-                label="Affronter le Gardien des Ronces"
-                onPress={() =>
-                  runKingdom(async (db) => {
-                    const r = await startCombat(db);
-                    return { message: r.message };
-                  })
-                }
-                disabled={kingdomBusy}
-              />
+              <FantasyPanel>
+                <Text style={styles.section}>Choisir l&apos;adversaire</Text>
+                <View style={styles.enemyRow}>
+                  {kingdom.enemies.map((e) => (
+                    <Chip
+                      key={e.id}
+                      label={`${e.name} (${e.baseHp} PV)`}
+                      selected={pickedEnemy === e.id}
+                      onPress={() => setPickedEnemy(e.id as EnemyId)}
+                    />
+                  ))}
+                </View>
+                <Button
+                  label="Engager le combat"
+                  onPress={() =>
+                    runKingdom(async (db) => {
+                      const r = await startCombat(db, pickedEnemy);
+                      return { message: r.message };
+                    })
+                  }
+                  disabled={kingdomBusy}
+                />
+              </FantasyPanel>
             ) : null}
           </>
         ) : null}
@@ -328,4 +341,5 @@ const styles = StyleSheet.create({
   tabs: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: spacing.sm },
   section: { ...typography.label, color: colors.gold, marginTop: spacing.lg },
   goldValue: { ...typography.title, color: colors.gold, marginBottom: spacing.xs },
+  enemyRow: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: spacing.sm, gap: spacing.xs },
 });
