@@ -19,6 +19,22 @@ import {
   type QuestBoard,
   type QuestBoardEntry,
 } from '@/src/domain/services/questService';
+import {
+  abandonRenewableQuest,
+  acceptRenewableQuest,
+  claimRenewableQuest,
+  failRenewableTimer,
+  getRenewableQuestBoard,
+  partialStopRenewableTimer,
+  refreshRenewableState,
+  startRenewableTimer,
+  succeedRenewableTimer,
+  type RenewableQuestBoard,
+  type RenewableBoardEntry,
+} from '@/src/domain/services/renewableQuestService';
+import { RenewableQuestCard } from '@/src/design-system/RenewableQuestCard';
+import type { RenewableQuestCategory } from '@/src/data/content/renewableQuestTemplates';
+import { CATEGORY_LABELS } from '@/src/data/content/renewableQuestTemplates';
 import { chooseAdventure, equipLantern, getAdventureView } from '@/src/domain/services/adventureService';
 import {
   confirmForgeUpgrade,
@@ -41,6 +57,9 @@ export default function AdventureScreen() {
   const [kingdomMsg, setKingdomMsg] = useState<string | null>(null);
   const [tab, setTab] = useState<'royaume' | 'quests' | 'trail'>('royaume');
   const [board, setBoard] = useState<QuestBoard | null>(null);
+  const [renewableBoard, setRenewableBoard] = useState<RenewableQuestBoard | null>(null);
+  const [questCategory, setQuestCategory] = useState<RenewableQuestCategory | 'toutes'>('toutes');
+  const [winFlashId, setWinFlashId] = useState<string | null>(null);
   const [questMsg, setQuestMsg] = useState<string | null>(null);
   const [questBusy, setQuestBusy] = useState(false);
   const [kingdomBusy, setKingdomBusy] = useState(false);
@@ -55,6 +74,7 @@ export default function AdventureScreen() {
     const db = await getDb();
     setView(await getAdventureView(db));
     setBoard(await getQuestBoard(db));
+    setRenewableBoard(await getRenewableQuestBoard(db));
     setKingdom(await getKingdomView(db));
   }, []);
 
@@ -125,7 +145,7 @@ export default function AdventureScreen() {
     }, [load]),
   );
 
-  if (!view || !board || !kingdom) {
+  if (!view || !board || !kingdom || !renewableBoard) {
     return (
       <Screen>
         <Body>Chargement…</Body>
@@ -134,8 +154,64 @@ export default function AdventureScreen() {
   }
 
   const byState = (...states: QuestBoardEntry['state'][]) => board.entries.filter((e) => states.includes(e.state));
-  const inProgress = [...byState('ready'), ...byState('accepted')];
+  const legendInProgress = [...byState('ready'), ...byState('accepted')];
   const full = board.acceptedCount >= board.maxAccepted;
+  const renewFull = renewableBoard.acceptedCount >= renewableBoard.maxAccepted;
+  const filterRenewable = (e: RenewableBoardEntry) =>
+    questCategory === 'toutes' || questCategory === 'legendes'
+      ? true
+      : e.template.category === questCategory;
+  const renewableVisible = renewableBoard.entries.filter(filterRenewable);
+  const renewableInProgress = renewableVisible.filter((e) => e.state === 'ready' || e.state === 'active');
+  const renewableOffers = renewableVisible.filter((e) => e.state === 'offered');
+  const runRenewable = async (
+    instanceId: string,
+    action: (db: Awaited<ReturnType<typeof getDb>>) => Promise<{ message: string; ok?: boolean }>,
+    flashWin?: boolean,
+  ) => {
+    if (questLock.current) return;
+    questLock.current = true;
+    setQuestBusy(true);
+    try {
+      const db = await getDb();
+      await refreshRenewableState(db, instanceId);
+      const r = await action(db);
+      setQuestMsg(r.message);
+      if (flashWin) {
+        setWinFlashId(instanceId);
+        setTimeout(() => setWinFlashId(null), 1800);
+      }
+    } catch (err) {
+      setQuestMsg(friendlyDbError(err));
+    } finally {
+      try {
+        await refresh();
+        await load();
+      } finally {
+        questLock.current = false;
+        setQuestBusy(false);
+      }
+    }
+  };
+  const renderRenewable = (entries: RenewableBoardEntry[]) =>
+    entries.map((e) => (
+      <RenewableQuestCard
+        key={e.instanceId}
+        entry={e}
+        busy={questBusy}
+        winFlash={winFlashId === e.instanceId}
+        acceptDisabledReason={
+          renewFull ? `Carnet renouvelable plein (${renewableBoard.maxAccepted}).` : null
+        }
+        onAccept={() => runRenewable(e.instanceId, (db) => acceptRenewableQuest(db, e.instanceId))}
+        onClaim={() => runRenewable(e.instanceId, (db) => claimRenewableQuest(db, e.instanceId), true)}
+        onAbandon={() => runRenewable(e.instanceId, (db) => abandonRenewableQuest(db, e.instanceId))}
+        onStartTimer={() => runRenewable(e.instanceId, (db) => startRenewableTimer(db, e.instanceId))}
+        onFailTimer={() => runRenewable(e.instanceId, (db) => failRenewableTimer(db, e.instanceId))}
+        onSucceedTimer={() => runRenewable(e.instanceId, (db) => succeedRenewableTimer(db, e.instanceId), true)}
+        onPartialStop={() => runRenewable(e.instanceId, (db) => partialStopRenewableTimer(db, e.instanceId))}
+      />
+    ));
   const renderCards = (entries: QuestBoardEntry[]) =>
     entries.map((e) => (
       <QuestBoardCard
@@ -295,31 +371,57 @@ export default function AdventureScreen() {
         {tab === 'quests' ? (
           <>
             <FantasyPanel accent>
-              <Text style={styles.goldValue}>{board.goldBalance} or</Text>
+              <Text style={styles.goldValue}>{renewableBoard.goldBalance} or</Text>
               <Body muted>
-                {`Carnet : ${board.acceptedCount}/${board.maxAccepted} quêtes acceptées. L'or peut améliorer la forge au bastion. Tu choisis tes quêtes, à ton rythme.`}
+                {`Renouvelables : ${renewableBoard.acceptedCount}/${renewableBoard.maxAccepted} · Or quêtes aujourd'hui : encore ${renewableBoard.dailyGoldRemaining} / cap journalier.`}
               </Body>
             </FantasyPanel>
             {questMsg ? <Body muted>{questMsg}</Body> : null}
-            <Text style={styles.section}>En cours</Text>
-            {inProgress.length === 0 ? (
-              <EmptyState
-                title="Aucune quête en cours"
-                hint="Choisis une quête ci-dessous dans Disponibles, puis suis les étapes sur la carte."
-              />
-            ) : (
-              renderCards(inProgress)
-            )}
-            <Text style={styles.section}>Disponibles</Text>
-            {byState('available').length === 0 ? (
-              <Body muted>Toutes les quêtes du carnet sont acceptées ou terminées.</Body>
-            ) : (
-              renderCards(byState('available'))
-            )}
-            {byState('claimed').length ? (
+            <View style={styles.tabs}>
+              <Chip label="Toutes" selected={questCategory === 'toutes'} onPress={() => setQuestCategory('toutes')} />
+              {(Object.keys(CATEGORY_LABELS) as RenewableQuestCategory[]).map((c) => (
+                <Chip
+                  key={c}
+                  label={CATEGORY_LABELS[c]}
+                  selected={questCategory === c}
+                  onPress={() => setQuestCategory(c)}
+                />
+              ))}
+            </View>
+            {questCategory !== 'legendes' ? (
               <>
-                <Text style={[styles.section, styles.sectionSecondary]}>Terminées</Text>
-                {renderCards(byState('claimed'))}
+                <Text style={styles.section}>Recommandées</Text>
+                {renewableBoard.recommended.filter(filterRenewable).length === 0 ? (
+                  <Body muted>Aucune quête recommandée pour ce filtre.</Body>
+                ) : (
+                  renderRenewable(renewableBoard.recommended.filter(filterRenewable))
+                )}
+                <Text style={styles.section}>En cours</Text>
+                {renewableInProgress.length === 0 ? (
+                  <EmptyState title="Aucune quête renouvelable en cours" hint="Accepte une quête ci-dessous." />
+                ) : (
+                  renderRenewable(renewableInProgress)
+                )}
+                <Text style={styles.section}>Disponibles</Text>
+                {renewableOffers.length === 0 ? (
+                  <Body muted>Pas d&apos;offre pour l&apos;instant — reviens plus tard.</Body>
+                ) : (
+                  renderRenewable(renewableOffers)
+                )}
+              </>
+            ) : null}
+            {questCategory === 'legendes' || questCategory === 'toutes' ? (
+              <>
+                <Text style={styles.section}>Légendes (quêtes uniques)</Text>
+                {legendInProgress.length === 0 && byState('available').length === 0 ? (
+                  <Body muted>Les quatre quêtes légendaires sont terminées ou en attente.</Body>
+                ) : (
+                  <>
+                    {renderCards(legendInProgress)}
+                    {renderCards(byState('available'))}
+                  </>
+                )}
+                {byState('claimed').length ? renderCards(byState('claimed')) : null}
               </>
             ) : null}
           </>

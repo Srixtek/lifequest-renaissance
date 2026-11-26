@@ -30,6 +30,9 @@ const TABLES = [
   'adaptive_challenge_records',
   'kingdom_buildings',
   'kingdom_combat',
+  'renewable_quest_instances',
+  'renewable_quest_history',
+  'combat_victory_log',
 ] as const;
 
 /** Ordre enfants → parents (FK) pour un vidage sans orphelins. */
@@ -50,6 +53,9 @@ const WIPE_ORDER: readonly string[] = [
   'equipment_slots',
   'quest_instances',
   'story_flags',
+  'combat_victory_log',
+  'renewable_quest_history',
+  'renewable_quest_instances',
   'kingdom_combat',
   'kingdom_buildings',
   'character_progress',

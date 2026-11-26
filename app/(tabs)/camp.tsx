@@ -18,7 +18,7 @@ import type { GoalDefinition, TrackingStatus } from '@/src/domain/models/types';
 import { publicGoalTitle } from '@/src/domain/content/goalDisplay';
 import { getDb } from '@/src/data/db/client';
 import { upgradeCamp } from '@/src/domain/services/adventureService';
-import { buildCampNextChallenge } from '@/src/domain/services/campNextChallenge';
+import { buildWhatToDoNow, type WhatToDoNow } from '@/src/domain/services/whatToDoNowService';
 import { delayMinutesForTier } from '@/src/domain/content/vapeChallengeDefs';
 
 function todayStatusLabel(
@@ -48,6 +48,7 @@ export default function CampScreen() {
   const [vapeDelayMin, setVapeDelayMin] = useState<number | null>(null);
   const [vapeRunning, setVapeRunning] = useState(false);
   const [campMsg, setCampMsg] = useState<string | null>(null);
+  const [whatToDo, setWhatToDo] = useState<WhatToDoNow | null>(null);
 
   const activeGoals = useMemo(
     () => goals.filter((g) => g.status === 'active'),
@@ -84,26 +85,38 @@ export default function CampScreen() {
     }, [refresh, reloadVapeHint]),
   );
 
-  const nextChallengeModel = useMemo(
-    () =>
-      buildCampNextChallenge({
-        activeGoals,
-        todayTracking,
-        vapeDelayMin,
-        vapeRunning,
-      }),
-    [activeGoals, todayTracking, vapeDelayMin, vapeRunning],
+  const reloadWhatToDo = useCallback(async () => {
+    const db = await getDb();
+    const w = await buildWhatToDoNow(db, {
+      activeGoals,
+      todayTracking,
+      vapeDelayMin,
+      vapeRunning,
+    });
+    setWhatToDo(w);
+  }, [activeGoals, todayTracking, vapeDelayMin, vapeRunning]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void reloadWhatToDo();
+    }, [reloadWhatToDo]),
   );
 
-  const nextChallenge = useMemo(() => {
-    const { route, ...rest } = nextChallengeModel;
-    const onPress = () => {
-      if (route.kind === 'vape-adaptive') router.push('/tools/vape-adaptive');
-      else if (route.kind === 'challenges') router.push(`/tools/challenges?type=${route.challengeType}`);
-      else router.push('/(tabs)/goals');
-    };
-    return { ...rest, cta: rest.cta, onPress };
-  }, [nextChallengeModel, router]);
+  const onWhatToDo = useCallback(() => {
+    if (!whatToDo) return;
+    const r = whatToDo.route;
+    if (r.kind === 'adventure') {
+      router.push('/(tabs)/adventure');
+    } else if (r.kind === 'vape-adaptive') {
+      router.push('/tools/vape-adaptive');
+    } else if (r.kind === 'challenges') {
+      router.push(`/tools/challenges?type=${r.challengeType}`);
+    } else if (r.kind === 'goals') {
+      router.push('/(tabs)/goals');
+    } else {
+      router.push('/(tabs)/camp');
+    }
+  }, [whatToDo, router]);
 
   const className = CLASSES.find((c) => c.id === profile?.classId)?.name ?? 'Voyageur';
   const totalXp = character?.totalXp ?? 0;
@@ -135,13 +148,13 @@ export default function CampScreen() {
           </View>
         </View>
 
+        <Text style={styles.sectionTitle}>Que faire maintenant ?</Text>
         <NextChallengeCard
-          title={nextChallenge.title}
-          subtitle={nextChallenge.subtitle}
-          targetLine={nextChallenge.targetLine}
-          ctaLabel={nextChallenge.cta}
-          onPress={nextChallenge.onPress}
-          empty={'empty' in nextChallenge && nextChallenge.empty}
+          title={whatToDo?.title ?? 'Chargement…'}
+          subtitle={whatToDo?.subtitle ?? ''}
+          ctaLabel={whatToDo?.cta ?? '…'}
+          onPress={onWhatToDo}
+          empty={whatToDo?.kind === 'idle'}
         />
 
         <Text style={styles.sectionTitle}>Aujourd'hui</Text>
