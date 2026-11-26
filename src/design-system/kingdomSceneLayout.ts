@@ -6,7 +6,7 @@ export const SCREEN_HORIZONTAL_PADDING = spacing.lg * 2;
 
 const COLUMN_GAP = 6;
 const HIT_TOP_RATIO = 0.34;
-const HIT_HEIGHT_RATIO = 0.52;
+const HIT_HEIGHT_RATIO = 0.60;
 const BUILDING_COLUMN_FILL = 0.82;
 
 export type RectDp = { left: number; top: number; width: number; height: number };
@@ -44,7 +44,12 @@ function columnSlot(left: number, width: number): ColumnSlot {
 }
 
 export function computeKingdomSceneLayout(screenWidth: number, sceneHeight = 248): KingdomSceneLayout {
-  const sceneWidth = sceneContentWidth(screenWidth);
+  return computeKingdomSceneLayoutFromWidth(sceneContentWidth(screenWidth), sceneHeight);
+}
+
+/** Measured onLayout width; never assume Screen padding inside a nested view. */
+export function computeKingdomSceneLayoutFromWidth(sceneWidth: number, sceneHeight = 248): KingdomSceneLayout {
+  const screenWidth = sceneWidth + SCREEN_HORIZONTAL_PADDING;
   const colW = (sceneWidth - COLUMN_GAP * 2) / 3;
   const buildingSpriteDp = crispBuildingSizeDp(colW);
   const propSpriteDp = Math.round(buildingSpriteDp * 0.84);

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import type { EnemyId } from '../data/content/kingdom';
 import { SKILL_CONCENTRATION_COST, CONCENTRATION_MAX } from '../data/content/kingdom';
 import { enemyDisplayName } from '../domain/combat/combatEngine';
@@ -10,7 +10,7 @@ import type { ClassId } from '../domain/models/types';
 import { Button, Body } from './ui';
 import { colors, spacing, typography } from './theme';
 import { FantasyPanel } from './FantasyPanel';
-import { pixelDim } from './pixelSprite';
+import { computeCombatVisualLayout } from './combatVisualLayout';
 import { useReduceMotion } from './useReduceMotion';
 
 type Props = {
@@ -25,8 +25,6 @@ type Props = {
   onSkill: () => void;
   onLeave?: () => void;
 };
-
-const COMBAT_STAGE_HEIGHT = pixelDim(3.6) + spacing.xl + 28;
 
 const CLASS_LABELS: Record<ClassId, string> = {
   rodeur: 'Rôdeur',
@@ -62,6 +60,11 @@ export function CombatPanel({
   const reduceMotion = reduceProp ?? reduceHook;
   const intent = intentCopy(combat.enemyIntent);
   const [flash, setFlash] = useState<'hit' | 'defend' | null>(null);
+  const { width: screenWidth } = useWindowDimensions();
+  const [stageWidth, setStageWidth] = useState<number | null>(null);
+  // Screen horizontal padding + FantasyPanel inner padding/borders.
+  const estimatedWidth = Math.max(180, screenWidth - spacing.lg * 2 - spacing.md * 2 - 4);
+  const visual = computeCombatVisualLayout(stageWidth ?? estimatedWidth);
   const enemyId = (combat.enemyId ?? 'thorn_guardian') as EnemyId;
 
   useEffect(() => {
@@ -81,15 +84,21 @@ export function CombatPanel({
 
   return (
     <FantasyPanel>
-      <View style={[styles.stage, flash === 'hit' && !reduceMotion && styles.flashHit, flash === 'defend' && !reduceMotion && styles.flashDefend]}>
-        <CombatArenaArt height={COMBAT_STAGE_HEIGHT} />
+      <View
+        style={[styles.stage, { minHeight: visual.stageHeight }, flash === 'hit' && !reduceMotion && styles.flashHit, flash === 'defend' && !reduceMotion && styles.flashDefend]}
+        onLayout={({ nativeEvent }) => {
+          const w = Math.round(nativeEvent.layout.width);
+          if (w > 0 && w !== stageWidth) setStageWidth(w);
+        }}
+      >
+        <CombatArenaArt height={visual.stageHeight} />
         <View style={styles.fighters}>
           <FighterSlot label={CLASS_LABELS[classId]} side="left">
-            <CombatFighterArt kind="hero" classId={classId} size={pixelDim(3.6)} pulse={!combat.outcome} />
+            <CombatFighterArt kind="hero" classId={classId} size={visual.fighterSize} pulse={!combat.outcome} />
           </FighterSlot>
           <Text style={styles.vs}>vs</Text>
           <FighterSlot label={enemyDisplayName(enemyId)} side="right">
-            <CombatFighterArt kind="enemy" enemyId={enemyId} size={pixelDim(3.6)} pulse={!combat.outcome} />
+            <CombatFighterArt kind="enemy" enemyId={enemyId} size={visual.fighterSize} pulse={!combat.outcome} />
           </FighterSlot>
         </View>
         <HpBar inScene current={combat.heroHp} max={combat.heroHpMax} tint={colors.emerald} style={styles.heroHp} />
@@ -224,7 +233,6 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     overflow: 'hidden',
     marginBottom: spacing.sm,
-    minHeight: COMBAT_STAGE_HEIGHT,
     borderWidth: 1,
     borderColor: colors.line,
   },
@@ -254,7 +262,7 @@ const styles = StyleSheet.create({
   fighter: { alignItems: 'center', gap: 4, flex: 1, minWidth: 0, maxWidth: '40%' },
   fighterEnd: { alignItems: 'center' },
   fighterLabel: { ...typography.caption, color: colors.muted, fontSize: 10, textAlign: 'center' },
-  vs: { ...typography.caption, color: colors.line, marginBottom: pixelDim(0.8), flexShrink: 0 },
+  vs: { ...typography.caption, color: colors.line, marginBottom: spacing.md, flexShrink: 0 },
   sceneHp: { position: 'absolute', width: '36%', maxWidth: 120 },
   heroHp: { left: spacing.sm, bottom: spacing.sm },
   enemyHp: { right: spacing.sm, bottom: spacing.sm },
