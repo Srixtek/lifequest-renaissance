@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ScrollView, View, Text, StyleSheet } from 'react-native';
-import { Body, Button, Chip, Field, Screen, SectionTitle } from '@/src/design-system/ui';
+import { View, Text, StyleSheet } from 'react-native';
+import { Body, Button, Chip, Field, SectionTitle, TabScrollView } from '@/src/design-system/ui';
 import { CollapsibleSection } from '@/src/design-system/CollapsibleSection';
 import { colors, spacing, typography } from '@/src/design-system/theme';
 import { EmptyState, QuestCard } from '@/src/design-system/QuestCard';
@@ -352,9 +352,7 @@ export default function GoalsScreen() {
   const goalsToRender = mode === 'challenges' ? challengeGoals : activeGoals;
 
   return (
-    <Screen>
-      <ScrollView contentContainerStyle={{ paddingBottom: spacing.xxl, paddingTop: spacing.sm }}>
-        <SectionTitle accent>Habitudes</SectionTitle>
+    <TabScrollView>
         <Text style={styles.dateLine}>{today}</Text>
         <Body muted>
           Vide ≠ zéro. Les jours sans saisie restent « non renseignés » (0 XP). Corrige librement dans la journée.
@@ -640,13 +638,12 @@ export default function GoalsScreen() {
           </View>
         ) : null}
 
-      </ScrollView>
-    </Screen>
+    </TabScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  dateLine: { ...typography.caption, color: colors.gold, marginBottom: spacing.sm },
+  dateLine: { ...typography.caption, color: colors.gold, marginBottom: spacing.sm, marginTop: spacing.xs },
   sectionHeading: {
     ...typography.subtitle,
     color: colors.ink,

@@ -12,7 +12,7 @@ type Props = {
   height?: number;
 };
 
-export function KingdomScene({ forgeLevel, onZone, height = 268 }: Props) {
+export function KingdomScene({ forgeLevel, onZone, height = 276 }: Props) {
   const { width: screenWidth } = useWindowDimensions();
   const [measuredSceneWidth, setMeasuredSceneWidth] = useState<number | null>(null);
   const layout = useMemo(

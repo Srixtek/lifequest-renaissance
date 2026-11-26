@@ -12,7 +12,7 @@ import Svg, {
 import { colors } from './theme';
 
 /** Scène de camp nocturne — illustration d'accueil. */
-export function ForestScene({ height = 168 }: { height?: number }) {
+export function ForestScene({ height = 132 }: { height?: number }) {
   return (
     <View style={[styles.wrap, { height }]} accessibilityElementsHidden importantForAccessibility="no">
       <Svg width="100%" height={height} viewBox="0 0 360 168" preserveAspectRatio="xMidYMid slice">

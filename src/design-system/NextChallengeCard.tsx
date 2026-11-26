@@ -53,7 +53,7 @@ function Ornament() {
 
 const styles = StyleSheet.create({
   wrap: {
-    marginTop: spacing.lg,
+    marginTop: spacing.md,
     padding: spacing.lg,
     borderRadius: radius.xl,
     borderWidth: 1,

@@ -1,17 +1,69 @@
 import React from 'react';
 import {
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
+  type ScrollViewProps,
+  type StyleProp,
   type TextInputProps,
   type ViewStyle,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, spacing, typography } from './theme';
 
 export function Screen({ children, style }: { children: React.ReactNode; style?: ViewStyle }) {
   return <View style={[styles.screen, style]}>{children}</View>;
+}
+
+/** Onglets : inset haut fixe hors scroll (barre d’état) + marge bas pour la tab bar. */
+export function TabScrollView({
+  children,
+  safeTop = false,
+  flushHorizontal = false,
+  contentContainerStyle,
+  style,
+  ...scrollProps
+}: {
+  children: React.ReactNode;
+  /** À true quand l’écran n’a pas de header natif (ex. Accueil). */
+  safeTop?: boolean;
+  /** Le contenu gère son propre padding horizontal (ex. illustration pleine largeur). */
+  flushHorizontal?: boolean;
+  contentContainerStyle?: StyleProp<ViewStyle>;
+  style?: StyleProp<ViewStyle>;
+} & Omit<ScrollViewProps, 'children' | 'contentContainerStyle' | 'style'>) {
+  const insets = useSafeAreaInsets();
+  const bottomPad = insets.bottom + spacing.xxl;
+
+  const screenPad: ViewStyle = {
+    paddingBottom: 0,
+    ...(safeTop ? { paddingTop: insets.top } : null),
+    ...(flushHorizontal ? { paddingHorizontal: 0 } : null),
+  };
+
+  return (
+    <Screen style={screenPad}>
+      <ScrollView
+        style={[{ flex: 1 }, style]}
+        contentContainerStyle={[
+          {
+            paddingBottom: bottomPad,
+            paddingTop: safeTop ? spacing.xs : spacing.sm,
+            paddingHorizontal: flushHorizontal ? spacing.lg : 0,
+          },
+          contentContainerStyle,
+        ]}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+        {...scrollProps}
+      >
+        {children}
+      </ScrollView>
+    </Screen>
+  );
 }
 
 export function BrandTitle({ subtitle }: { subtitle?: string }) {
@@ -61,7 +113,8 @@ export function Button({
         variant === 'ghost' && styles.btnGhost,
         variant === 'danger' && styles.btnDanger,
         variant === 'neutral' && styles.btnNeutral,
-        (pressed || disabled) && { opacity: 0.7 },
+        disabled && styles.btnDisabled,
+        pressed && !disabled && { opacity: 0.88 },
       ]}
     >
       <Text
@@ -186,6 +239,11 @@ const styles = StyleSheet.create({
   },
   btnDanger: { backgroundColor: colors.danger, borderColor: colors.danger },
   btnNeutral: {
+    backgroundColor: colors.mist,
+    borderColor: colors.line,
+  },
+  btnDisabled: {
+    opacity: 0.45,
     backgroundColor: colors.mist,
     borderColor: colors.line,
   },
