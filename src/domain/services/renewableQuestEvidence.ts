@@ -24,6 +24,8 @@ export function parseProgressJson(raw: string | null): {
   forgeLevelAtAccept?: number;
   proofChallengeSessionId?: string;
   proofCombatVictoryId?: string;
+  proofBreathingCopeSessionId?: string;
+  rewardGold?: number;
 } {
   if (!raw) return {};
   try {
@@ -47,7 +49,20 @@ export function renewableProofSatisfied(
   return progress.current >= progress.target && progress.target > 0;
 }
 
-async function consumedCombatVictoryIds(db: Conn, excludeInstanceId?: string): Promise<Set<string>> {
+export async function consumedBreathingCopeSessionIds(db: Conn, excludeInstanceId?: string): Promise<Set<string>> {
+  const rows = await db.getAllAsync<{ id: string; progress_json: string | null }>(
+    `SELECT id, progress_json FROM renewable_quest_instances WHERE status IN ('active', 'ready', 'claimed')`,
+  );
+  const used = new Set<string>();
+  for (const row of rows) {
+    if (excludeInstanceId && row.id === excludeInstanceId) continue;
+    const meta = parseProgressJson(row.progress_json);
+    if (meta.proofBreathingCopeSessionId) used.add(meta.proofBreathingCopeSessionId);
+  }
+  return used;
+}
+
+export async function consumedCombatVictoryIds(db: Conn, excludeInstanceId?: string): Promise<Set<string>> {
   const rows = await db.getAllAsync<{ id: string; progress_json: string | null }>(
     `SELECT id, progress_json FROM renewable_quest_instances WHERE status IN ('active', 'ready', 'claimed')`,
   );
@@ -77,6 +92,23 @@ function challengeSessionProofComplete(
     return session.durationSec >= target;
   }
   return false;
+}
+
+export async function pickFreeCombatVictoryId(
+  db: Conn,
+  template: RenewableQuestTemplate,
+  acceptedAt: string,
+  excludeInstanceId?: string,
+): Promise<string | null> {
+  const enemy = template.targetEnemyId ?? 'thorn_guardian';
+  const consumed = await consumedCombatVictoryIds(db, excludeInstanceId);
+  const victories = await db.getAllAsync<{ id: string }>(
+    `SELECT id FROM combat_victory_log WHERE enemy_id = ? AND outcome = 'victory' AND fought_at >= ? ORDER BY fought_at ASC`,
+    enemy,
+    acceptedAt,
+  );
+  const pick = victories.find((v) => !consumed.has(v.id));
+  return pick?.id ?? null;
 }
 
 export async function evaluateRenewableProof(
@@ -122,26 +154,43 @@ export async function evaluateRenewableProof(
           label: `${Math.min(target, elapsed)} / ${target} s`,
         };
       }
-      const rows = await db.getAllAsync<{ created_at: string; duration_sec: number; meta_json: string | null }>(
-        `SELECT created_at, duration_sec, meta_json FROM coping_sessions
+      const boundCope = progressMeta.proofBreathingCopeSessionId;
+      if (boundCope) {
+        const row = await db.getFirstAsync<{ duration_sec: number; completed: number; meta_json: string | null }>(
+          `SELECT duration_sec, completed, meta_json FROM coping_sessions WHERE id = ?`,
+          boundCope,
+        );
+        if (row?.completed === 1) {
+          const meta = row.meta_json ? JSON.parse(row.meta_json) : {};
+          if (!meta.shortcut && Number(row.duration_sec) >= target) {
+            return { current: 1, target: 1, label: `1 / 1 souffle (${target}s)` };
+          }
+        }
+      }
+      const consumed = await consumedBreathingCopeSessionIds(db);
+      const rows = await db.getAllAsync<{ id: string; created_at: string; duration_sec: number; meta_json: string | null }>(
+        `SELECT id, created_at, duration_sec, meta_json FROM coping_sessions
          WHERE kind = 'breathing' AND completed = 1 AND created_at >= ?`,
         acceptedAt,
       );
       const acceptedMs = Date.parse(acceptedAt);
       let best = progressMeta.timer?.partialBestSec ?? 0;
       for (const r of rows) {
+        if (consumed.has(r.id) || r.id === boundCope) continue;
         const meta = r.meta_json ? JSON.parse(r.meta_json) : {};
         if (meta.shortcut) continue;
         const startMs = Date.parse(r.created_at) - Math.max(0, Number(r.duration_sec) || 0) * 1000;
+        if (Number.isFinite(startMs) && startMs >= acceptedMs && Number(r.duration_sec) >= target) {
+          return { current: 1, target: 1, label: `1 / 1 souffle (${target}s)` };
+        }
         if (Number.isFinite(startMs) && startMs >= acceptedMs) {
           best = Math.max(best, Number(r.duration_sec) || 0);
         }
       }
-      const done = best >= target ? 1 : 0;
       return {
-        current: done ? 1 : 0,
+        current: 0,
         target: 1,
-        label: done ? `1 / 1 souffle (${target}s)` : `${best} / ${target} s`,
+        label: best > 0 ? `${best} / ${target} s` : `${best} / ${target} s`,
       };
     }
     case 'inline_challenge': {

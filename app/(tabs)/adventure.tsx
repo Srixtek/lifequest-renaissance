@@ -202,7 +202,7 @@ export default function AdventureScreen() {
       await refreshRenewableState(db, instanceId);
       const r = await action(db);
       setQuestMsg(r.message);
-      if (flashWin) {
+      if (flashWin && r.ok === true) {
         setWinFlashId(instanceId);
         setTimeout(() => setWinFlashId(null), 1800);
       }

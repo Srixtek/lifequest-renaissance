@@ -18,6 +18,7 @@ import { createId } from '../../utils/id';
 import {
   evaluateRenewableProof,
   parseProgressJson,
+  pickFreeCombatVictoryId,
   renewableProofSatisfied,
   type InlineTimerProgress,
 } from './renewableQuestEvidence';
@@ -249,24 +250,9 @@ export async function refreshRenewableState(db: Db, instanceId: string, now = ne
     if (template.proof === 'combat_victory' && progress.current >= 1) {
       const meta = parseProgressJson(row.progressJson);
       if (!meta.proofCombatVictoryId) {
-        const enemy = template.targetEnemyId ?? 'thorn_guardian';
-        const victories = await tx.getAllAsync<{ id: string }>(
-          `SELECT id FROM combat_victory_log WHERE enemy_id = ? AND outcome = 'victory' AND fought_at >= ? ORDER BY fought_at ASC`,
-          enemy,
-          row.acceptedAt,
-        );
-        const consumed = new Set<string>();
-        const others = await tx.getAllAsync<{ progress_json: string | null }>(
-          `SELECT progress_json FROM renewable_quest_instances WHERE id != ? AND status IN ('active','ready','claimed')`,
-          instanceId,
-        );
-        for (const o of others) {
-          const m = parseProgressJson(o.progress_json);
-          if (m.proofCombatVictoryId) consumed.add(m.proofCombatVictoryId);
-        }
-        const pick = victories.find((v) => !consumed.has(v.id));
+        const pick = await pickFreeCombatVictoryId(tx, template, row.acceptedAt, instanceId);
         if (pick) {
-          meta.proofCombatVictoryId = pick.id;
+          meta.proofCombatVictoryId = pick;
           progressJson = JSON.stringify(meta);
         }
       }
@@ -284,21 +270,34 @@ export async function startRenewableTimer(
   let result = { ok: false, message: 'Action impossible.' };
   await db.withExclusiveTransactionAsync(async (tx) => {
     const row = await renewableQuestRepo.getInstance(tx, instanceId);
-    if (!row?.acceptedAt) {
+    if (row?.status !== 'active') {
+      result = { ok: false, message: 'Accepte la quête avant de lancer le chrono.' };
+      return;
+    }
+    if (!row.acceptedAt) {
       result = { ok: false, message: 'Accepte la quête avant de lancer le chrono.' };
       return;
     }
     const template = RENEWABLE_BY_ID[row.templateId];
     if (!template) return;
+    const existingMeta = parseProgressJson(row.progressJson);
+    if (existingMeta.timer?.state === 'running') {
+      result = { ok: false, message: 'Un chrono est déjà en cours sur cette carte.' };
+      return;
+    }
+    if (row.challengeSessionId) {
+      const linked = await challengeSessionRepo.getById(tx, row.challengeSessionId);
+      if (linked?.state === 'running') {
+        result = { ok: false, message: 'Un chrono est déjà en cours sur cette carte.' };
+        return;
+      }
+    }
 
     if (template.proof === 'breathing_timer') {
       const target = template.targetDurationSec ?? 180;
       const timer: InlineTimerProgress = { kind: 'breathing', startedUtc: at, targetSec: target, state: 'running' };
-      const progressJson = JSON.stringify({ ...parseProgressJson(row.progressJson), timer });
+      const progressJson = JSON.stringify({ ...existingMeta, timer });
       await renewableQuestRepo.updateProgress(tx, instanceId, progressJson, null, at);
-      if (row.status === 'offered') {
-        await renewableQuestRepo.markActive(tx, instanceId, at, progressJson, null);
-      }
       result = { ok: true, message: 'Chrono respiration démarré.' };
       return;
     }
@@ -315,7 +314,7 @@ export async function startRenewableTimer(
         targetSec: template.targetDurationSec ?? 600,
         state: 'running',
       };
-      const progressJson = JSON.stringify({ ...parseProgressJson(row.progressJson), timer });
+      const progressJson = JSON.stringify({ ...existingMeta, timer });
       await renewableQuestRepo.updateProgress(tx, instanceId, progressJson, started.session.id, at);
       result = { ok: true, message: 'Chrono démarré sur la carte.' };
     }
@@ -338,6 +337,7 @@ export async function failRenewableTimer(db: Db, instanceId: string, now = new D
     const meta = parseProgressJson(row.progressJson);
     if (meta.timer) meta.timer.state = 'stopped';
     await renewableQuestRepo.updateProgress(tx, instanceId, JSON.stringify(meta), null, at);
+    await tx.runAsync(`UPDATE renewable_quest_instances SET challenge_session_id = NULL WHERE id = ?`, instanceId);
     await renewableQuestRepo.markFailed(tx, instanceId, at);
     const tmpl = RENEWABLE_BY_ID[row.templateId];
   const replacement = tmpl ? await pickTemplateForCategory(tx, tmpl.category, row.templateId) : null;
@@ -386,8 +386,9 @@ export async function succeedRenewableTimer(db: Db, instanceId: string, now = ne
         result = { ok: false, message: `Encore ${target - elapsed} s avant la cible.` };
         return;
       }
-      await recordBreathingSessionOnConn(tx, target, true);
+      const cope = await recordBreathingSessionOnConn(tx, target, true);
       if (timer) timer.state = 'stopped';
+      meta.proofBreathingCopeSessionId = cope.copingSessionId;
       const readyJson = JSON.stringify({ ...meta, timer });
       await renewableQuestRepo.updateProgress(tx, instanceId, readyJson, null, at);
       await renewableQuestRepo.markReady(tx, instanceId, readyJson, at);
@@ -524,10 +525,37 @@ export async function claimRenewableQuest(db: Db, instanceId: string, now = new 
     }
     const template = RENEWABLE_BY_ID[row.templateId];
     if (!template) return;
-    const progress = await evaluateRenewableProof(tx, template, row.acceptedAt, row.progressJson, row.challengeSessionId);
-    if (row.status !== 'ready' && !renewableProofSatisfied(template, progress, row.status)) {
+    const at = now.toISOString();
+    let progressJson = row.progressJson;
+    let status = row.status;
+    const meta = parseProgressJson(progressJson);
+
+    if (template.proof === 'combat_victory') {
+      if (!meta.proofCombatVictoryId) {
+        const pick = await pickFreeCombatVictoryId(tx, template, row.acceptedAt, instanceId);
+        if (!pick) {
+          result = { ok: false, message: 'Aucune victoire éligible pour cette quête.' };
+          return;
+        }
+        meta.proofCombatVictoryId = pick;
+        progressJson = JSON.stringify(meta);
+        if (status === 'active') {
+          await renewableQuestRepo.markReady(tx, instanceId, progressJson, at);
+          status = 'ready';
+        } else if (status === 'ready') {
+          await renewableQuestRepo.updateProgress(tx, instanceId, progressJson, row.challengeSessionId, at);
+        }
+      }
+    }
+
+    const progress = await evaluateRenewableProof(tx, template, row.acceptedAt, progressJson, row.challengeSessionId);
+    if (status !== 'ready' && !renewableProofSatisfied(template, progress, status)) {
       result = { ok: false, message: 'Objectif pas encore atteint.' };
       return;
+    }
+    if (status === 'active' && renewableProofSatisfied(template, progress, 'active')) {
+      await renewableQuestRepo.markReady(tx, instanceId, progressJson, at);
+      status = 'ready';
     }
     const dayStart = utcDayStart(now);
     const earnedToday = await getRenewableGoldEarnedToday(tx, dayStart);
@@ -535,11 +563,11 @@ export async function claimRenewableQuest(db: Db, instanceId: string, now = new 
     if (earnedToday + payout > RENEWABLE_GOLD_DAILY_CAP) {
       payout = Math.max(0, RENEWABLE_GOLD_DAILY_CAP - earnedToday);
     }
-    const at = now.toISOString();
     if (payout > 0) {
       await rpgRepo.addGold(tx, payout, `Quête « ${template.title} »`, renewableRewardKey(instanceId), at);
     }
-    await renewableQuestRepo.markClaimed(tx, instanceId, at, JSON.stringify({ rewardGold: payout }));
+    const claimMeta = { ...parseProgressJson(progressJson), rewardGold: payout };
+    await renewableQuestRepo.markClaimed(tx, instanceId, at, JSON.stringify(claimMeta));
     await renewableQuestRepo.insertHistory(tx, createId('rqh'), instanceId, template.id, template.category, at);
     await spawnRenewal(tx, template.category, template.id, at);
     const balance = await rpgRepo.getGoldBalance(tx);

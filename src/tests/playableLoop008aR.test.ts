@@ -222,3 +222,101 @@ suite('008A-R — fiabilisation boucle jouable', () => {
     expect(session?.state).toBe('interrupted');
   });
 });
+
+suite('008A-R patch final — verrous', () => {
+  let t: TestDb;
+  beforeEach(async () => {
+    t = await openNodeSqliteDb();
+  });
+  afterEach(() => t.close());
+
+  test('double démarrage chrono refusé', async () => {
+    const inst = await seedOffer(t, 'rnw_sport_quick');
+    await acceptRenewableQuest(t.db, inst);
+    expect((await startRenewableTimer(t.db, inst)).ok).toBe(true);
+    const again = await startRenewableTimer(t.db, inst);
+    expect(again.ok).toBe(false);
+  });
+
+  test('start chrono refusé si quête non active', async () => {
+    const inst = await seedOffer(t, 'rnw_breathe_3');
+    const r = await startRenewableTimer(t.db, inst);
+    expect(r.ok).toBe(false);
+  });
+
+  test('combat : claim direct sans refresh + double claim après renouvellement', async () => {
+    const victoryId = createId('cbt');
+    const foughtAt = new Date().toISOString();
+    await t.db.runAsync(
+      `INSERT INTO combat_victory_log (id, enemy_id, outcome, fought_at) VALUES (?, 'thorn_guardian', 'victory', ?)`,
+      victoryId,
+      foughtAt,
+    );
+    const inst1 = await seedOffer(t, 'rnw_beat_thorn');
+    await acceptRenewableQuest(t.db, inst1);
+    const claim1 = await claimRenewableQuest(t.db, inst1);
+    expect(claim1.ok).toBe(true);
+    const claimed = await renewableQuestRepo.getInstance(t.db, inst1);
+    const meta1 = JSON.parse(claimed!.progressJson ?? '{}');
+    expect(meta1.proofCombatVictoryId).toBe(victoryId);
+    expect(meta1.rewardGold).toBeGreaterThan(0);
+
+    const inst2 = await seedOffer(t, 'rnw_beat_thorn');
+    await acceptRenewableQuest(t.db, inst2);
+    const claim2 = await claimRenewableQuest(t.db, inst2);
+    expect(claim2.ok).toBe(false);
+  });
+
+  test('respiration liée par copingSessionId à l\'instance', async () => {
+    const inst = await seedOffer(t, 'rnw_breathe_calm');
+    await acceptRenewableQuest(t.db, inst);
+    await startRenewableTimer(t.db, inst);
+    const past = new Date(Date.now() - 120_000).toISOString();
+    await t.db.runAsync(
+      `UPDATE renewable_quest_instances SET progress_json = ? WHERE id = ?`,
+      JSON.stringify({
+        timer: { kind: 'breathing', startedUtc: past, targetSec: 60, state: 'running' },
+        forgeLevelAtAccept: 0,
+      }),
+      inst,
+    );
+    await succeedRenewableTimer(t.db, inst);
+    const row = await renewableQuestRepo.getInstance(t.db, inst);
+    const meta = JSON.parse(row!.progressJson ?? '{}');
+    expect(meta.proofBreathingCopeSessionId).toBeTruthy();
+
+    const inst2 = await seedOffer(t, 'rnw_breathe_calm');
+    await acceptRenewableQuest(t.db, inst2);
+    const tmpl = RENEWABLE_BY_ID['rnw_breathe_calm'];
+    const p2 = await evaluateRenewableProof(
+      t.db,
+      tmpl,
+      (await renewableQuestRepo.getInstance(t.db, inst2))!.acceptedAt!,
+      null,
+      null,
+    );
+    expect(renewableProofSatisfied(tmpl, p2, 'active')).toBe(false);
+  });
+
+  test('arrêt partiel au-delà de la cible ne passe pas en ready', async () => {
+    const inst = await seedOffer(t, 'rnw_breathe_3');
+    await acceptRenewableQuest(t.db, inst);
+    await startRenewableTimer(t.db, inst);
+    const past = new Date(Date.now() - 400_000).toISOString();
+    await t.db.runAsync(
+      `UPDATE renewable_quest_instances SET progress_json = ? WHERE id = ?`,
+      JSON.stringify({
+        timer: { kind: 'breathing', startedUtc: past, targetSec: 180, state: 'running' },
+        forgeLevelAtAccept: 0,
+      }),
+      inst,
+    );
+    const partial = await partialStopRenewableTimer(t.db, inst);
+    expect(partial.ok).toBe(true);
+    const row = await renewableQuestRepo.getInstance(t.db, inst);
+    expect(row?.status).toBe('active');
+    const tmpl = RENEWABLE_BY_ID['rnw_breathe_3'];
+    const proof = await evaluateRenewableProof(t.db, tmpl, row!.acceptedAt!, row!.progressJson, null);
+    expect(renewableProofSatisfied(tmpl, proof, 'active')).toBe(false);
+  });
+});
