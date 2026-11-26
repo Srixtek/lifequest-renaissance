@@ -1,7 +1,7 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { BastionSceneArt } from './art/BastionSceneArt';
-import { computeKingdomSceneLayout } from './kingdomSceneLayout';
+import { computeKingdomSceneLayout, computeKingdomSceneLayoutFromWidth } from './kingdomSceneLayout';
 import { colors, spacing, typography } from './theme';
 
 export type KingdomZone = 'forge' | 'combat' | 'forest' | 'camp';
@@ -14,7 +14,13 @@ type Props = {
 
 export function KingdomScene({ forgeLevel, onZone, height = 268 }: Props) {
   const { width: screenWidth } = useWindowDimensions();
-  const layout = useMemo(() => computeKingdomSceneLayout(screenWidth, height), [screenWidth, height]);
+  const [measuredSceneWidth, setMeasuredSceneWidth] = useState<number | null>(null);
+  const layout = useMemo(
+    () => measuredSceneWidth === null
+      ? computeKingdomSceneLayout(screenWidth, height)
+      : computeKingdomSceneLayoutFromWidth(measuredSceneWidth, height),
+    [screenWidth, height, measuredSceneWidth],
+  );
   const { buildingSpriteDp, hitboxes, columns } = layout;
 
   const centers = useMemo(
@@ -27,8 +33,22 @@ export function KingdomScene({ forgeLevel, onZone, height = 268 }: Props) {
   );
 
   return (
-    <View style={[styles.wrap, { height }]} accessibilityRole="image" accessibilityLabel="Bastion d'Eloria, village nocturne">
-      <BastionSceneArt height={height} forgeLevel={forgeLevel} centers={centers} buildingDp={buildingSpriteDp} />
+    <View
+      style={[styles.wrap, { height }]}
+      accessibilityRole="image"
+      accessibilityLabel="Bastion d'Eloria, village nocturne"
+      onLayout={({ nativeEvent }) => {
+        const w = Math.round(nativeEvent.layout.width);
+        if (w > 0 && w !== measuredSceneWidth) setMeasuredSceneWidth(w);
+      }}
+    >
+      <BastionSceneArt
+        width={layout.sceneWidth}
+        height={height}
+        forgeLevel={forgeLevel}
+        centers={centers}
+        buildingDp={buildingSpriteDp}
+      />
 
       <View style={styles.forestSlot} pointerEvents="none" accessibilityElementsHidden>
         <Text style={styles.lockedTag}>Forêt — bientôt</Text>

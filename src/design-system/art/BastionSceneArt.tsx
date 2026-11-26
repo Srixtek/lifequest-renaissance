@@ -13,11 +13,13 @@ import Svg, {
   Text as SvgText,
 } from 'react-native-svg';
 import { ep } from './eloriaPalette';
+import { bastionSceneGeometry } from './bastionSceneGeometry';
 import { colors } from '../theme';
 
 type ColumnCenters = { combat: number; camp: number; forge: number };
 
 type Props = {
+  width: number;
   height: number;
   forgeLevel: number;
   centers: ColumnCenters;
@@ -25,14 +27,13 @@ type Props = {
 };
 
 /** Village nocturne du bastion — fond composé (original SVG). */
-export function BastionSceneArt({ height, forgeLevel, centers, buildingDp }: Props) {
-  const vbH = 220;
+export function BastionSceneArt({ width, height, forgeLevel, centers, buildingDp }: Props) {
+  const { viewBox, groundY, labelY } = bastionSceneGeometry(width, height);
   const scale = buildingDp / 72;
-  const groundY = vbH - 28;
 
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="none">
-      <Svg width="100%" height={height} viewBox={`0 0 360 ${vbH}`} preserveAspectRatio="xMidYMid slice">
+      <Svg width="100%" height={height} viewBox={viewBox} preserveAspectRatio="none">
         <Defs>
           <LinearGradient id="bastionSky" x1="0" y1="0" x2="0" y2="1">
             <Stop offset="0" stopColor={ep.nightSkyTop} />
@@ -54,38 +55,38 @@ export function BastionSceneArt({ height, forgeLevel, centers, buildingDp }: Pro
           </RadialGradient>
         </Defs>
 
-        <Rect x="0" y="0" width="360" height={vbH} fill="url(#bastionSky)" />
-        <Rect x="0" y="0" width="360" height={vbH * 0.7} fill="url(#moonGlow)" />
+        <Rect x="0" y="0" width={width} height={height} fill="url(#bastionSky)" />
+        <Rect x="0" y="0" width={width} height={height * 0.7} fill="url(#moonGlow)" />
 
         {[
-          [28, 16],
-          [90, 24],
-          [150, 12],
-          [250, 18],
-          [310, 10],
+          [width * 0.08, 16],
+          [width * 0.25, 24],
+          [width * 0.42, 12],
+          [width * 0.70, 18],
+          [width * 0.86, 10],
         ].map(([x, y], i) => (
           <Circle key={`star-${i}`} cx={x} cy={y} r={i % 2 === 0 ? 1.1 : 0.8} fill={colors.goldBright} opacity={0.35 + (i % 3) * 0.12} />
         ))}
 
-        <Circle cx="312" cy="32" r="14" fill={colors.gold} opacity="0.35" />
-        <Circle cx="312" cy="32" r="20" fill={colors.gold} opacity="0.08" />
+        <Circle cx={width - 48} cy="32" r="14" fill={colors.gold} opacity="0.35" />
+        <Circle cx={width - 48} cy="32" r="20" fill={colors.gold} opacity="0.08" />
 
         {/* collines */}
-        <Path d={`M0 ${groundY + 8} Q90 ${groundY - 22} 180 ${groundY - 8} T360 ${groundY + 6} V${vbH} H0 Z`} fill={ep.hillFar} opacity="0.85" />
-        <Path d={`M0 ${groundY + 14} Q120 ${groundY + 2} 200 ${groundY + 10} T360 ${groundY + 12} V${vbH} H0 Z`} fill={ep.hillNear} opacity="0.55" />
+        <Path d={`M0 ${groundY + 8} Q${width * 0.25} ${groundY - 22} ${width * 0.5} ${groundY - 8} T${width} ${groundY + 6} V${height} H0 Z`} fill={ep.hillFar} opacity="0.85" />
+        <Path d={`M0 ${groundY + 14} Q${width / 3} ${groundY + 2} ${width * 0.56} ${groundY + 10} T${width} ${groundY + 12} V${height} H0 Z`} fill={ep.hillNear} opacity="0.55" />
 
         {/* arbres décor */}
         <Tree x={18} baseY={groundY + 4} h={52} />
-        <Tree x={330} baseY={groundY + 4} h={48} dark />
-        <Bush x={125} baseY={groundY + 18} />
-        <Bush x={235} baseY={groundY + 16} />
+        <Tree x={width - 30} baseY={groundY + 4} h={48} dark />
+        <Bush x={width * 0.35} baseY={groundY + 18} />
+        <Bush x={width * 0.65} baseY={groundY + 16} />
 
         {/* chemin sinueux */}
         <Path
           d={`M20 ${groundY + 20} Q60 ${groundY + 8} ${centers.combat} ${groundY + 14}
             Q${(centers.combat + centers.camp) / 2} ${groundY + 6} ${centers.camp} ${groundY + 12}
             Q${(centers.camp + centers.forge) / 2} ${groundY + 4} ${centers.forge} ${groundY + 10}
-            Q320 ${groundY + 16} 345 ${groundY + 22}`}
+            Q${width - 40} ${groundY + 16} ${width - 15} ${groundY + 22}`}
           stroke="url(#pathGrad)"
           strokeWidth="10"
           fill="none"
@@ -100,12 +101,12 @@ export function BastionSceneArt({ height, forgeLevel, centers, buildingDp }: Pro
 
         {forgeLevel >= 1 ? <Ellipse cx={centers.forge} cy={groundY - 42 * scale} rx={38 * scale} ry={28 * scale} fill="url(#forgeGlow)" /> : null}
 
-        <Path d={`M0 ${groundY + 22} L360 ${groundY + 22} L360 ${vbH} L0 ${vbH} Z`} fill="#070F0E" opacity="0.9" />
+        <Path d={`M0 ${groundY + 22} L${width} ${groundY + 22} L${width} ${height} L0 ${height} Z`} fill="#070F0E" opacity="0.9" />
 
         {/* labels */}
-        <ZoneLabel x={centers.combat} y={groundY + 36} text="Arène" accent={colors.goldBright} />
-        <ZoneLabel x={centers.camp} y={groundY + 36} text="Camp" accent={colors.ink} />
-        <ZoneLabel x={centers.forge} y={groundY + 36} text="Forge" accent={forgeLevel > 0 ? colors.gold : colors.muted} />
+        <ZoneLabel x={centers.combat} y={labelY} text="Arène" accent={colors.goldBright} />
+        <ZoneLabel x={centers.camp} y={labelY} text="Camp" accent={colors.ink} />
+        <ZoneLabel x={centers.forge} y={labelY} text="Forge" accent={forgeLevel > 0 ? colors.gold : colors.muted} />
       </Svg>
     </View>
   );
