@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, View, Text, StyleSheet } from 'react-native';
-import { Body, Button, Chip, Field, Screen, Title } from '@/src/design-system/ui';
+import { ScrollView, View, Text, StyleSheet } from 'react-native';
+import { Body, Button, Chip, Field, Screen, SectionTitle } from '@/src/design-system/ui';
+import { CollapsibleSection } from '@/src/design-system/CollapsibleSection';
 import { colors, spacing, typography } from '@/src/design-system/theme';
-import { FantasyPanel } from '@/src/design-system/FantasyPanel';
 import { EmptyState, QuestCard } from '@/src/design-system/QuestCard';
 import { completionRatio } from '@/src/domain/rules/xp';
 import { useAppStore } from '@/src/state/appStore';
@@ -78,12 +78,13 @@ export default function GoalsScreen() {
   const [editTargetDraft, setEditTargetDraft] = useState<Record<string, string>>({});
   const [actionBusy, setActionBusy] = useState(false);
   const actionLockRef = useRef(false);
-  const [showCustom, setShowCustom] = useState(false);
   const [customTitle, setCustomTitle] = useState('');
   const [customKind, setCustomKind] = useState<GoalKind>('habit');
   const [customUnit, setCustomUnit] = useState('');
   const [customTarget, setCustomTarget] = useState('');
   const [customTier, setCustomTier] = useState<GoalTier>('normal');
+  const [mode, setMode] = useState<'track' | 'challenges'>('track');
+  const [detailsOpen, setDetailsOpen] = useState<Record<string, boolean>>({});
 
   const activeGoals = useMemo(
     () => goals.filter((g) => g.status !== 'archived'),
@@ -98,6 +99,15 @@ export default function GoalsScreen() {
     const added = new Set(goals.map((g) => g.templateId).filter(Boolean));
     return GOAL_TEMPLATES.filter((t) => added.has(t.id));
   }, [goals]);
+
+  const challengeGoals = useMemo(
+    () =>
+      activeGoals.filter((g) => {
+        if (g.templateId === 'vape_sessions') return true;
+        return challengeTypeForTemplate(g.templateId) != null;
+      }),
+    [activeGoals],
+  );
 
   const showFeedback = (msg: string) => {
     setFlash(msg);
@@ -288,7 +298,6 @@ export default function GoalsScreen() {
       setCustomTitle('');
       setCustomUnit('');
       setCustomTarget('');
-      setShowCustom(false);
       await refresh();
       showFeedback(`Habitude personnalisée « ${title} » créée.`);
     });
@@ -334,25 +343,44 @@ export default function GoalsScreen() {
   const binaryWeeklyHabit = (g: GoalDefinition) =>
     g.kind === 'habit' && versions[g.id]?.scheduleKind === 'weekly';
 
+  const toggleDetails = (goalId: string) => {
+    setDetailsOpen((d) => ({ ...d, [goalId]: !d[goalId] }));
+  };
+
+  const goalsToRender = mode === 'challenges' ? challengeGoals : activeGoals;
+
   return (
     <Screen>
       <ScrollView contentContainerStyle={{ paddingBottom: spacing.xxl, paddingTop: spacing.sm }}>
-        <Title>Habitudes</Title>
+        <SectionTitle accent>Habitudes</SectionTitle>
         <Text style={styles.dateLine}>{today}</Text>
         <Body muted>
           Vide ≠ zéro. Les jours sans saisie restent « non renseignés » (0 XP). Corrige librement dans la journée.
         </Body>
         {flash ? <Text style={styles.flash}>{flash}</Text> : null}
 
-        <Text style={styles.sectionHeading}>Mes habitudes actives</Text>
-        {activeGoals.length === 0 ? (
+        <View style={styles.modeRow}>
+          <Chip label="Suivre mes habitudes" selected={mode === 'track'} onPress={() => setMode('track')} />
+          <Chip label="Relever des défis" selected={mode === 'challenges'} onPress={() => setMode('challenges')} />
+        </View>
+
+        {mode === 'track' ? (
+          <Text style={styles.sectionHeading}>Mes habitudes actives</Text>
+        ) : (
+          <Text style={styles.sectionHeading}>Défis liés à tes habitudes</Text>
+        )}
+        {goalsToRender.length === 0 ? (
           <EmptyState
-            title="Pas encore d'habitude"
-            hint="Choisis un modèle ci-dessous ou crée un objectif sur mesure."
+            title={mode === 'track' ? "Pas encore d'habitude" : 'Aucun défi disponible'}
+            hint={
+              mode === 'track'
+                ? 'Déplie « Ajouter une habitude » pour commencer.'
+                : 'Active une habitude avec défi (ex. vape) depuis l\'onglet Suivre.'
+            }
           />
         ) : null}
 
-        {activeGoals.map((g) => {
+        {goalsToRender.map((g) => {
           const tr = todayTracking[g.id];
           const rawStatus = g.status === 'paused' ? 'paused' : (tr?.status ?? 'unknown');
           const status = rawStatus;
@@ -386,6 +414,9 @@ export default function GoalsScreen() {
           const challengeType = challengeTypeForTemplate(g.templateId);
           const displayTitle = publicGoalTitle(g);
 
+          const showTrackControls = mode === 'track';
+          const showChallengeCtas = mode === 'challenges';
+
           return (
             <QuestCard
               key={g.id}
@@ -397,24 +428,23 @@ export default function GoalsScreen() {
               valueLabel={savedValue}
               progress={progress}
             >
-
-              {g.templateId === 'vape_sessions' ? (
+              {showChallengeCtas && g.templateId === 'vape_sessions' ? (
                 <Button
-                  label="Mes défis"
-                  variant="secondary"
+                  label="Ouvrir mes défis vape"
                   onPress={() => router.push('/tools/vape-adaptive')}
                   disabled={actionBusy}
                 />
               ) : null}
-              {challengeType && g.templateId !== 'vape_sessions' ? (
+              {showChallengeCtas && challengeType && g.templateId !== 'vape_sessions' ? (
                 <Button
-                  label="Ouvrir le défi chronométré"
-                  variant="secondary"
+                  label="Lancer le défi chronométré"
                   onPress={() => router.push(`/tools/challenges?type=${challengeType}`)}
                   disabled={actionBusy}
                 />
               ) : null}
 
+              {!showTrackControls ? null : (
+                <>
               {tpl?.neutralNote ? (
                 <View style={styles.note}>
                   <Body>{tpl.neutralNote}</Body>
@@ -507,72 +537,67 @@ export default function GoalsScreen() {
                 </>
               ) : null}
 
-              {(kindRequiresNumericTarget(g.kind) || ver?.scheduleKind === 'weekly') && g.status !== 'paused' ? (
-                <View style={styles.note}>
-                  <Body>Modifier mon objectif (effet dès demain)</Body>
-                  <Field
-                    value={editTargetDraft[g.id] ?? (ver?.weeklyTarget != null ? String(ver.weeklyTarget) : ver?.target != null ? String(ver.target) : '')}
-                    onChangeText={(t) => setEditTargetDraft((d) => ({ ...d, [g.id]: t }))}
-                    keyboardType="decimal-pad"
-                    placeholder={ver?.scheduleKind === 'weekly' ? 'Jours / semaine' : 'Nouvelle cible'}
-                  />
-                  <Button
-                    label="Enregistrer la cible"
-                    variant="secondary"
-                    disabled={actionBusy}
-                    onPress={() => void applyTargetEdit(g.id, g.kind)}
-                  />
-                </View>
+              {detailsOpen[g.id] ? (
+                <>
+                  {(kindRequiresNumericTarget(g.kind) || ver?.scheduleKind === 'weekly') && g.status !== 'paused' ? (
+                    <View style={styles.note}>
+                      <Body>Modifier mon objectif (effet dès demain)</Body>
+                      <Field
+                        value={editTargetDraft[g.id] ?? (ver?.weeklyTarget != null ? String(ver.weeklyTarget) : ver?.target != null ? String(ver.target) : '')}
+                        onChangeText={(t) => setEditTargetDraft((d) => ({ ...d, [g.id]: t }))}
+                        keyboardType="decimal-pad"
+                        placeholder={ver?.scheduleKind === 'weekly' ? 'Jours / semaine' : 'Nouvelle cible'}
+                      />
+                      <Button
+                        label="Enregistrer la cible"
+                        variant="secondary"
+                        disabled={actionBusy}
+                        onPress={() => void applyTargetEdit(g.id, g.kind)}
+                      />
+                    </View>
+                  ) : null}
+                  <View style={styles.manageRow}>
+                    <Chip
+                      label={g.status === 'paused' ? 'Reprendre' : 'Pause'}
+                      onPress={() => {
+                        void runAction(async () => {
+                          const db = await getDb();
+                          await setGoalStatus(db, g.id, g.status === 'paused' ? 'active' : 'paused');
+                          await refresh();
+                        });
+                      }}
+                    />
+                    <Chip
+                      label="Archiver"
+                      onPress={() => {
+                        void runAction(async () => {
+                          const db = await getDb();
+                          await setGoalStatus(db, g.id, 'archived');
+                          showFeedback('Archivé — l\'historique est conservé.');
+                          await refresh();
+                        });
+                      }}
+                    />
+                  </View>
+                </>
               ) : null}
-
-              <View style={styles.manageRow}>
-                <Chip
-                  label={g.status === 'paused' ? 'Reprendre' : 'Pause'}
-                  onPress={() => {
-                    void runAction(async () => {
-                      const db = await getDb();
-                      await setGoalStatus(db, g.id, g.status === 'paused' ? 'active' : 'paused');
-                      await refresh();
-                    });
-                  }}
-                />
-                <Chip
-                  label="Archiver"
-                  onPress={() => {
-                    void runAction(async () => {
-                      const db = await getDb();
-                      await setGoalStatus(db, g.id, 'archived');
-                      showFeedback('Archivé — l\'historique est conservé.');
-                      await refresh();
-                    });
-                  }}
-                />
-              </View>
+              <Button
+                label={detailsOpen[g.id] ? 'Masquer détails' : 'Détails & réglages'}
+                variant="ghost"
+                onPress={() => toggleDetails(g.id)}
+                disabled={actionBusy}
+              />
+                </>
+              )}
             </QuestCard>
           );
         })}
 
-        <FantasyPanel accent>
-          <Text style={styles.sectionHeading}>Ajouter une habitude</Text>
-          <Body muted>Catégorie → intention → cible → valider.</Body>
-          <HabitSetupFlow
-            disabled={actionBusy}
-            onFeedback={showFeedback}
-            onDone={refresh}
-          />
-        </FantasyPanel>
-
-        <FantasyPanel>
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => setShowCustom((v) => !v)}
-            style={styles.customToggle}
-          >
-            <Text style={styles.sectionHeading}>Créer une habitude personnalisée</Text>
-            <Body muted>{showCustom ? 'Masquer' : 'Déplier pour nom, type, unité et cible'}</Body>
-          </Pressable>
-          {showCustom ? (
-            <View>
+        {mode === 'track' ? (
+          <CollapsibleSection title="Ajouter une habitude" hint="Modèles guidés et création personnalisée">
+            <Body muted>Catégorie → intention → cible → valider.</Body>
+            <HabitSetupFlow disabled={actionBusy} onFeedback={showFeedback} onDone={refresh} />
+            <CollapsibleSection title="Habitude personnalisée" hint="Nom, type, unité et cible">
               <Field value={customTitle} onChangeText={setCustomTitle} placeholder="Nom" />
               <Body muted>Type</Body>
               <View style={styles.row}>
@@ -609,23 +634,10 @@ export default function GoalsScreen() {
                   />
                 ))}
               </View>
-              <View style={styles.row}>
-                <Button label="Créer l'habitude" onPress={() => void createCustom()} disabled={actionBusy} />
-                <Button
-                  label="Annuler"
-                  onPress={() => {
-                    setShowCustom(false);
-                    setCustomTitle('');
-                    setCustomUnit('');
-                    setCustomTarget('');
-                  }}
-                  variant="ghost"
-                  disabled={actionBusy}
-                />
-              </View>
-            </View>
-          ) : null}
-        </FantasyPanel>
+              <Button label="Créer l'habitude" onPress={() => void createCustom()} disabled={actionBusy} />
+            </CollapsibleSection>
+          </CollapsibleSection>
+        ) : null}
 
         {templateNotes.some((t) => t.alcoholSafety || t.nicotineNote) ? (
           <View style={styles.note}>
@@ -657,5 +669,5 @@ const styles = StyleSheet.create({
     borderColor: colors.line,
     backgroundColor: colors.bg,
   },
-  customToggle: { marginBottom: spacing.sm },
+  modeRow: { flexDirection: 'row', flexWrap: 'wrap', marginTop: spacing.md, marginBottom: spacing.sm },
 });

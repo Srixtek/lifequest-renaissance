@@ -32,16 +32,22 @@ export function Body({ children, muted }: { children: React.ReactNode; muted?: b
   return <Text style={[styles.body, muted && styles.muted]}>{children}</Text>;
 }
 
+export function SectionTitle({ children, accent }: { children: React.ReactNode; accent?: boolean }) {
+  return <Text style={[styles.sectionTitle, accent && styles.sectionTitleAccent]}>{children}</Text>;
+}
+
 export function Button({
   label,
   onPress,
   variant = 'primary',
   disabled,
+  compact,
 }: {
   label: string;
   onPress: () => void;
-  variant?: 'primary' | 'secondary' | 'ghost' | 'danger';
+  variant?: 'primary' | 'secondary' | 'ghost' | 'danger' | 'neutral';
   disabled?: boolean;
+  compact?: boolean;
 }) {
   return (
     <Pressable
@@ -50,9 +56,11 @@ export function Button({
       onPress={onPress}
       style={({ pressed }) => [
         styles.btn,
+        compact && styles.btnCompact,
         variant === 'secondary' && styles.btnSecondary,
         variant === 'ghost' && styles.btnGhost,
         variant === 'danger' && styles.btnDanger,
+        variant === 'neutral' && styles.btnNeutral,
         (pressed || disabled) && { opacity: 0.7 },
       ]}
     >
@@ -62,10 +70,29 @@ export function Button({
           variant === 'secondary' && styles.btnTextSecondary,
           variant === 'ghost' && styles.btnTextGhost,
           variant === 'danger' && styles.btnTextDanger,
+          variant === 'neutral' && styles.btnTextNeutral,
         ]}
       >
         {label}
       </Text>
+    </Pressable>
+  );
+}
+
+export function SecondaryLink({
+  label,
+  onPress,
+}: {
+  label: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      style={({ pressed }) => [styles.link, pressed && { opacity: 0.85 }]}
+    >
+      <Text style={styles.linkText}>{label}</Text>
     </Pressable>
   );
 }
@@ -111,52 +138,83 @@ const styles = StyleSheet.create({
   brand: { ...typography.brand, color: colors.ember },
   brandSub: { ...typography.caption, color: colors.muted, marginTop: 2 },
   title: { ...typography.title, color: colors.ink, marginBottom: spacing.sm },
+  sectionTitle: {
+    ...typography.title,
+    color: colors.ink,
+    marginTop: spacing.lg,
+    marginBottom: spacing.sm,
+    fontSize: 20,
+  },
+  sectionTitleAccent: { color: colors.gold },
   body: { ...typography.body, color: colors.ink },
   muted: { color: colors.muted },
   btn: {
-    backgroundColor: colors.ember,
-    paddingVertical: 14,
-    paddingHorizontal: 18,
-    borderRadius: 10,
+    backgroundColor: colors.copper,
+    paddingVertical: 15,
+    paddingHorizontal: 20,
+    borderRadius: 12,
     alignItems: 'center',
     marginTop: spacing.sm,
+    minHeight: 48,
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: colors.goldDim,
+  },
+  btnCompact: {
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    minHeight: 44,
+    marginTop: 0,
   },
   btnSecondary: {
-    backgroundColor: colors.mist,
-    borderWidth: 1,
+    backgroundColor: colors.cardHighlight,
     borderColor: colors.emeraldDim,
   },
   btnGhost: {
     backgroundColor: 'transparent',
-    borderWidth: 1,
     borderColor: colors.line,
   },
-  btnDanger: { backgroundColor: colors.danger },
-  btnText: { color: colors.bg, fontWeight: '700', fontSize: 16 },
+  btnDanger: { backgroundColor: colors.danger, borderColor: colors.danger },
+  btnNeutral: {
+    backgroundColor: colors.mist,
+    borderColor: colors.line,
+  },
+  btnText: { color: '#1A1208', fontWeight: '700', fontSize: 16 },
   btnTextSecondary: { color: colors.ink },
-  btnTextGhost: { color: colors.ink },
+  btnTextGhost: { color: colors.muted },
   btnTextDanger: { color: colors.ink },
+  btnTextNeutral: { color: colors.muted },
+  link: {
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.xs,
+    minHeight: 44,
+    justifyContent: 'center',
+  },
+  linkText: { ...typography.body, color: colors.gold, fontWeight: '600', fontSize: 15 },
   input: {
     borderWidth: 1,
-    borderColor: colors.line,
+    borderColor: colors.lineBright,
     backgroundColor: colors.bgElevated,
     color: colors.ink,
-    borderRadius: 10,
+    borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 12,
     marginTop: spacing.sm,
     fontSize: 16,
+    minHeight: 48,
   },
   chip: {
     borderWidth: 1,
     borderColor: colors.line,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 10,
+    paddingVertical: 11,
+    paddingHorizontal: 14,
+    borderRadius: 12,
     marginRight: 8,
     marginBottom: 8,
+    minHeight: 44,
+    justifyContent: 'center',
   },
-  chipSelected: { backgroundColor: colors.mist, borderColor: colors.ember },
+  chipSelected: { backgroundColor: colors.mist, borderColor: colors.goldDim },
   chipText: { color: colors.muted },
   chipTextSelected: { color: colors.ink, fontWeight: '600' },
 });

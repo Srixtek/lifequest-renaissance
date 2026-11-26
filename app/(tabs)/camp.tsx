@@ -1,23 +1,27 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Body, Button, Screen } from '@/src/design-system/ui';
+import { Screen, SecondaryLink } from '@/src/design-system/ui';
 import { colors, spacing, typography } from '@/src/design-system/theme';
 import { ForestScene } from '@/src/design-system/ForestScene';
 import { FantasyPanel } from '@/src/design-system/FantasyPanel';
 import { ProgressBar } from '@/src/design-system/ProgressBar';
-import { AdventureQuestCard, EmptyState, QuestCard } from '@/src/design-system/QuestCard';
+import { NextChallengeCard } from '@/src/design-system/NextChallengeCard';
+import { EmptyState, QuestCard } from '@/src/design-system/QuestCard';
 import { CATEGORY_SHORT } from '@/src/design-system/categoryLabels';
 import { GOAL_TEMPLATES } from '@/src/data/content/goalTemplates';
 import { CLASSES } from '@/src/data/content/classes';
 import { useAppStore } from '@/src/state/appStore';
-import { getDb } from '@/src/data/db/client';
-import { upgradeCamp } from '@/src/domain/services/adventureService';
 import { XP_PER_LEVEL } from '@/src/domain/rules/xp';
 import type { GoalDefinition, TrackingStatus } from '@/src/domain/models/types';
 import { publicGoalTitle } from '@/src/domain/content/goalDisplay';
-import { useState } from 'react';
+import { challengeTypeForTemplate } from '@/src/domain/models/challengeSession';
+import { getDb } from '@/src/data/db/client';
+import {
+  delayMinutesForTier,
+  vapeChallengeDef,
+} from '@/src/domain/content/vapeChallengeDefs';
 
 function todayStatusLabel(
   goal: GoalDefinition,
@@ -44,7 +48,7 @@ export default function CampScreen() {
   const goals = useAppStore((s) => s.goals);
   const todayTracking = useAppStore((s) => s.todayTracking);
   const refresh = useAppStore((s) => s.refresh);
-  const [campMsg, setCampMsg] = useState<string | null>(null);
+  const [vapeDelayMin, setVapeDelayMin] = useState<number | null>(null);
 
   useEffect(() => {
     refresh();
@@ -54,6 +58,97 @@ export default function CampScreen() {
     () => goals.filter((g) => g.status === 'active'),
     [goals],
   );
+
+  const vapeGoal = useMemo(
+    () => activeGoals.find((g) => g.templateId === 'vape_sessions'),
+    [activeGoals],
+  );
+
+  useEffect(() => {
+    if (!vapeGoal) {
+      setVapeDelayMin(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const { getVapeAdaptiveDashboard } = await import('@/src/domain/services/adaptiveChallengeService');
+      const db = await getDb();
+      const dash = await getVapeAdaptiveDashboard(db);
+      if (cancelled) return;
+      if (dash.running) {
+        setVapeDelayMin(null);
+        return;
+      }
+      setVapeDelayMin(delayMinutesForTier(dash.state.tierIndex));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [vapeGoal?.id, goals]);
+
+  const nextChallenge = useMemo(() => {
+    if (vapeGoal && vapeDelayMin != null) {
+      const def = vapeChallengeDef('delay_craving');
+      return {
+        title: def.title,
+        subtitle: publicGoalTitle(vapeGoal),
+        targetLine: `Cible : tenir ${vapeDelayMin} min avant de vapoter`,
+        cta: 'Commencer',
+        onPress: () => router.push('/tools/vape-adaptive'),
+      };
+    }
+    const unstated = activeGoals.find((g) => {
+      if (g.templateId === 'vape_sessions') return false;
+      const tr = todayTracking[g.id];
+      const status = (tr?.status ?? 'unknown') as TrackingStatus;
+      return status === 'unknown';
+    });
+    if (unstated) {
+      const challengeType = challengeTypeForTemplate(unstated.templateId);
+      const displayTitle = publicGoalTitle(unstated);
+      if (challengeType) {
+        return {
+          title: `Défi : ${displayTitle}`,
+          subtitle: 'Chronomètre recommandé pour aujourd\'hui',
+          targetLine: undefined,
+          cta: 'Commencer',
+          onPress: () => router.push(`/tools/challenges?type=${challengeType}`),
+        };
+      }
+      return {
+        title: displayTitle,
+        subtitle: 'Ton suivi du jour n\'est pas encore renseigné',
+        targetLine: undefined,
+        cta: 'Renseigner',
+        onPress: () => router.push('/(tabs)/goals'),
+      };
+    }
+    if (activeGoals.length === 0) {
+      return {
+        title: 'Aucune habitude active',
+        subtitle: 'Choisis une première habitude pour lancer l\'aventure',
+        targetLine: undefined,
+        cta: 'Ajouter une habitude',
+        onPress: () => router.push('/(tabs)/goals'),
+        empty: true,
+      };
+    }
+    const doneCount = activeGoals.filter((g) => {
+      const tr = todayTracking[g.id];
+      const s = (tr?.status ?? 'unknown') as TrackingStatus;
+      return s === 'success' || s === 'partial';
+    }).length;
+    return {
+      title: doneCount === activeGoals.length ? 'Journée bien avancée' : 'Tout est à jour',
+      subtitle:
+        doneCount === activeGoals.length
+          ? 'Explore une quête ou prépare demain depuis Habitudes'
+          : 'Retrouve le détail de tes habitudes si besoin',
+      targetLine: `${doneCount}/${activeGoals.length} habitudes renseignées aujourd'hui`,
+      cta: 'Voir mes habitudes',
+      onPress: () => router.push('/(tabs)/goals'),
+    };
+  }, [activeGoals, todayTracking, vapeGoal, vapeDelayMin, router]);
 
   const className = CLASSES.find((c) => c.id === profile?.classId)?.name ?? 'Voyageur';
   const totalXp = character?.totalXp ?? 0;
@@ -71,129 +166,125 @@ export default function CampScreen() {
         }}
         showsVerticalScrollIndicator={false}
       >
-        <View style={{ paddingTop: Math.max(insets.top, spacing.md) }}>
+        <View style={{ paddingTop: Math.max(insets.top, spacing.sm) }}>
           <ForestScene />
           <View style={styles.heroOverlay}>
-            <Text style={styles.eloria}>Eloria</Text>
+            <Text style={styles.realm}>Eloria</Text>
             <Text style={styles.pseudo}>{profile?.pseudo ?? 'Voyageur'}</Text>
             <Text style={styles.classLine}>
-              {className} · Niveau {level}
+              {className} · Nv. {level}
             </Text>
             <ProgressBar
               progress={levelProgress}
-              label={`${Math.round(inLevelXp)} / ${XP_PER_LEVEL} XP vers le niveau ${level + 1}`}
+              label={`${Math.round(inLevelXp)} / ${XP_PER_LEVEL} XP`}
+              height={12}
             />
+            <View style={styles.resourceStrip}>
+              <ResourceChip label="Or" value={String(goldBalance)} />
+              <ResourceChip label="Éclats" value={String(shards)} />
+              <ResourceChip label="XP" value={String(Math.round(totalXp))} />
+            </View>
           </View>
         </View>
 
-        <FantasyPanel>
-          <Text style={styles.panelTitle}>Ressources</Text>
-          <View style={styles.resourceRow}>
-            <View style={styles.resourceBox}>
-              <Text style={styles.resourceValue}>{Math.round(totalXp)}</Text>
-              <Text style={styles.resourceLabel}>XP totale</Text>
-            </View>
-            <View style={styles.resourceBox}>
-              <Text style={styles.resourceValue}>{shards}</Text>
-              <Text style={styles.resourceLabel}>Éclats</Text>
-            </View>
-            <View style={styles.resourceBox}>
-              <Text style={styles.resourceValue}>{goldBalance}</Text>
-              <Text style={styles.resourceLabel}>Or</Text>
-            </View>
+        <NextChallengeCard
+          title={nextChallenge.title}
+          subtitle={nextChallenge.subtitle}
+          targetLine={nextChallenge.targetLine}
+          ctaLabel={nextChallenge.cta}
+          onPress={nextChallenge.onPress}
+          empty={'empty' in nextChallenge && nextChallenge.empty}
+        />
+
+        <Text style={styles.sectionTitle}>Aujourd'hui</Text>
+        {activeGoals.length === 0 ? (
+          <EmptyState
+            title="Rien à suivre pour l'instant"
+            hint="Ajoute une habitude depuis l'onglet Habitudes."
+          />
+        ) : (
+          activeGoals.map((g) => {
+            const tr = todayTracking[g.id];
+            const status = (tr?.status ?? 'unknown') as TrackingStatus;
+            const tpl = GOAL_TEMPLATES.find((t) => t.id === g.templateId);
+            const category = tpl?.category;
+            const displayTitle = publicGoalTitle(g);
+            return (
+              <Pressable
+                key={g.id}
+                onPress={() => router.push('/(tabs)/goals')}
+                accessibilityRole="button"
+              >
+                <QuestCard
+                  title={tpl ? CATEGORY_SHORT[category!] ?? displayTitle : displayTitle}
+                  category={category}
+                  status={status}
+                  targetLabel={displayTitle}
+                  valueLabel={todayStatusLabel(g, status, tr?.value != null)}
+                  compact
+                />
+              </Pressable>
+            );
+          })
+        )}
+
+        <FantasyPanel style={{ marginTop: spacing.lg }}>
+          <Text style={styles.panelTitle}>Accès rapide</Text>
+          <View style={styles.quickRow}>
+            <SecondaryLink label="Quêtes" onPress={() => router.push('/(tabs)/adventure')} />
+            <SecondaryLink label="Respiration" onPress={() => router.push('/tools/breathing')} />
+            <SecondaryLink label="Bilan" onPress={() => router.push('/(tabs)/stats')} />
+          </View>
+          <View style={styles.quickRow}>
+            <SecondaryLink label="Journal" onPress={() => router.push('/journal')} />
+            <SecondaryLink label="Paramètres" onPress={() => router.push('/settings')} />
+            {vapeGoal ? (
+              <SecondaryLink label="Défis vape" onPress={() => router.push('/tools/vape-adaptive')} />
+            ) : null}
           </View>
         </FantasyPanel>
-
-        <FantasyPanel accent>
-          <Text style={styles.panelTitle}>Mes objectifs d'aujourd'hui</Text>
-          <View style={{ marginBottom: spacing.sm }}>
-            <Body muted>
-              Chaque jour compte à ta façon. Sans saisie, le statut reste neutre — jamais un succès inventé.
-            </Body>
-          </View>
-          {activeGoals.length === 0 ? (
-            <EmptyState
-              title="Aucune habitude active"
-              hint="Ajoute un objectif depuis l'onglet Habitudes quand tu es prêt."
-            />
-          ) : (
-            activeGoals.map((g) => {
-              const tr = todayTracking[g.id];
-              const status = (tr?.status ?? 'unknown') as TrackingStatus;
-              const tpl = GOAL_TEMPLATES.find((t) => t.id === g.templateId);
-              const category = tpl?.category;
-              const displayTitle = publicGoalTitle(g);
-              return (
-                <Pressable
-                  key={g.id}
-                  onPress={() => router.push('/(tabs)/goals')}
-                  accessibilityRole="button"
-                >
-                  <QuestCard
-                    title={tpl ? CATEGORY_SHORT[category!] ?? displayTitle : displayTitle}
-                    category={category}
-                    status={status}
-                    targetLabel={displayTitle}
-                    valueLabel={todayStatusLabel(g, status, tr?.value != null)}
-                  />
-                </Pressable>
-              );
-            })
-          )}
-        </FantasyPanel>
-
-        <Text style={styles.sectionTitle}>Actions rapides</Text>
-        <View style={styles.quickGrid}>
-          <Button label="Renseigner une habitude" onPress={() => router.push('/(tabs)/goals')} />
-          <Button label="Respiration" variant="secondary" onPress={() => router.push('/tools/breathing')} />
-          <Button label="Gérer une envie" variant="secondary" onPress={() => router.push('/tools/urge')} />
-          <Button label="Défis chronométrés" variant="secondary" onPress={() => router.push('/tools/challenges')} />
-          <Button label="Journal" variant="ghost" onPress={() => router.push('/journal')} />
-        </View>
-
-        <AdventureQuestCard
-          title="Partir à l'aventure"
-          description="Explore les sentiers d'Eloria, équipe ta lanterne et fais évoluer ton camp — à ton rythme."
-          onPress={() => router.push('/(tabs)/adventure')}
-        />
-        <Button
-          label="Améliorer le camp"
-          variant="ghost"
-          onPress={async () => {
-            const db = await getDb();
-            const r = await upgradeCamp(db);
-            setCampMsg(r.message);
-            await refresh();
-          }}
-        />
-        {campMsg ? <Body muted>{campMsg}</Body> : null}
-        <Button label="Paramètres & sauvegarde" variant="ghost" onPress={() => router.push('/settings')} />
       </ScrollView>
     </Screen>
   );
 }
 
+function ResourceChip({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.chip}>
+      <Text style={styles.chipValue}>{value}</Text>
+      <Text style={styles.chipLabel}>{label}</Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   heroOverlay: {
-    marginTop: -spacing.lg,
-    paddingTop: spacing.sm,
+    marginTop: -spacing.md,
+    paddingTop: spacing.xs,
   },
-  eloria: { ...typography.label, color: colors.gold },
-  pseudo: { ...typography.title, color: colors.ink, fontSize: 26, marginTop: 4 },
-  classLine: { ...typography.body, color: colors.muted, marginTop: 2 },
-  panelTitle: { ...typography.subtitle, color: colors.gold, marginBottom: spacing.sm },
-  resourceRow: { flexDirection: 'row', gap: spacing.md },
-  resourceBox: {
+  realm: { ...typography.label, color: colors.gold },
+  pseudo: { ...typography.hero, color: colors.ink, marginTop: 4 },
+  classLine: { ...typography.caption, color: colors.muted, marginTop: 2, marginBottom: spacing.xs },
+  resourceStrip: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  chip: {
     flex: 1,
-    padding: spacing.md,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.sm,
     borderRadius: 12,
     backgroundColor: colors.mist,
     borderWidth: 1,
     borderColor: colors.line,
     alignItems: 'center',
+    minHeight: 48,
+    justifyContent: 'center',
   },
-  resourceValue: { fontSize: 28, fontWeight: '700', color: colors.ink },
-  resourceLabel: { ...typography.caption, color: colors.muted, marginTop: 4 },
-  sectionTitle: { ...typography.title, color: colors.ink, marginTop: spacing.lg },
-  quickGrid: { marginTop: spacing.sm },
+  chipValue: { fontSize: 18, fontWeight: '700', color: colors.goldBright },
+  chipLabel: { ...typography.caption, color: colors.muted, marginTop: 2 },
+  sectionTitle: { ...typography.title, color: colors.ink, marginTop: spacing.xl, fontSize: 20 },
+  panelTitle: { ...typography.subtitle, color: colors.gold, marginBottom: spacing.sm },
+  quickRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md },
 });

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, Text, View, StyleSheet } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -6,6 +6,9 @@ import { Body, Button, Chip, Screen, Title } from '@/src/design-system/ui';
 import { colors, spacing, typography } from '@/src/design-system/theme';
 import { FantasyPanel } from '@/src/design-system/FantasyPanel';
 import { ProgressBar } from '@/src/design-system/ProgressBar';
+import { BreathingRing } from '@/src/design-system/BreathingRing';
+import { CollapsibleSection } from '@/src/design-system/CollapsibleSection';
+import { VapeFormatCard } from '@/src/design-system/VapeFormatCard';
 import { getDb } from '@/src/data/db/client';
 import {
   closeVapeAdaptiveChallenge,
@@ -198,6 +201,11 @@ export default function VapeAdaptiveScreen() {
   const recordBest = dash?.record?.bestDurationSec ?? 0;
   const nextRecord = nextRecordMilestoneSec(recordBest);
 
+  const featuredFormat = useMemo((): VapeChallengeFormat => {
+    if (dash?.running) return dash.running.format;
+    return 'delay_craving';
+  }, [dash?.running]);
+
   return (
     <Screen style={{ paddingTop: 0 }}>
       <ScrollView
@@ -219,13 +227,100 @@ export default function VapeAdaptiveScreen() {
           </FantasyPanel>
         ) : null}
 
-        <FantasyPanel accent>
-          <Text style={styles.panelTitle}>Difficulté — retarder une envie</Text>
+        {running ? (
+          <View style={styles.heroCard}>
+            <Text style={styles.heroTitle}>{formatDefLabel(running.format)}</Text>
+            {targetSec != null ? (
+              <Body muted>
+                Cible du défi : {formatChallengeHms(targetSec)} — durée actuelle ci-dessous.
+              </Body>
+            ) : (
+              <Body muted>Chronomètre multi-jours — déclare quand tu vapes ou termine au palier record.</Body>
+            )}
+            <Text style={styles.timer}>{formatChallengeHms(elapsed)}</Text>
+            {running.format === 'breathing' ? <BreathingRing phase={breathPhase} /> : null}
+            {progress != null ? (
+              <ProgressBar progress={progress} label="Vers la cible du défi" />
+            ) : null}
+            <View style={styles.row}>
+              {running.format === 'record' ? (
+                <Button label="J'ai vapoté" variant="neutral" disabled={busy} onPress={() => void close('vaped')} />
+              ) : null}
+              <Button
+                label={
+                  running.format === 'record'
+                    ? 'Terminer (palier record atteint)'
+                    : running.format === 'breathing'
+                      ? 'Séance terminée (3 min)'
+                      : "J'ai tenu — valider"
+                }
+                disabled={busy || !canValidate}
+                onPress={() => void close('completed')}
+              />
+              {running.format !== 'record' ? (
+                <Button label="Interrompu / envie cédée" variant="neutral" disabled={busy} onPress={() => void close('vaped')} />
+              ) : null}
+              <Button
+                label="Arrêter sans renseigner"
+                variant="ghost"
+                disabled={busy}
+                onPress={() => void close('unknown')}
+              />
+            </View>
+          </View>
+        ) : (
+          <>
+            <FantasyPanel accent>
+              <Text style={styles.panelTitle}>Record personnel</Text>
+              {dash?.record ? (
+                <Body>
+                  Meilleur temps : {formatChallengeHms(dash.record.bestDurationSec)}
+                  {nextRecord != null
+                    ? ` — prochain palier or : ${formatChallengeHms(nextRecord)}`
+                    : highestRecordMilestoneMinutes(recordBest)
+                      ? ' — paliers record atteints'
+                      : ''}
+                </Body>
+              ) : (
+                <Body muted>
+                  Aucun record — premier palier or possible dès {VAPE_RECORD_MILESTONE_MINUTES[0]} min.
+                </Body>
+              )}
+            </FantasyPanel>
+            <Text style={styles.panelTitle}>Choisis ton défi</Text>
+            {FORMATS.map((f) => {
+              const def = vapeChallengeDef(f);
+              const hint =
+                f === 'delay_craving'
+                  ? `Cible ${delayMinutesForTier(delayTier)} min`
+                  : f === 'interval'
+                    ? `Cible ${intervalMinutesForTier(intervalTier)} min`
+                    : f === 'breathing'
+                      ? `Séance ${VAPE_BREATHING_SECONDS / 60} min · rythme 4s / 6s`
+                      : `Palier or dès ${VAPE_RECORD_MILESTONE_MINUTES[0]} min`;
+              return (
+                <VapeFormatCard
+                  key={f}
+                  format={f}
+                  title={def.title}
+                  subtitle={def.subtitle}
+                  hint={hint}
+                  featured={f === featuredFormat}
+                  disabled={busy || !dash?.vapeActive}
+                  onStart={() => void start(f)}
+                />
+              );
+            })}
+          </>
+        )}
+
+        <CollapsibleSection title="Ajuster la difficulté" hint="Paliers retard & intervalle">
+          <Text style={styles.panelTitle}>Retarder une envie</Text>
           <Body>
-            Palier actuel : {delayTier + 1}/{VAPE_TIER_COUNT} — cible {delayMinutesForTier(delayTier)} min
+            Palier {delayTier + 1}/{VAPE_TIER_COUNT} — {delayMinutesForTier(delayTier)} min
           </Body>
           {dash?.nextTierMinutes != null ? (
-            <Body muted>Prochain palier : {dash.nextTierMinutes} min de retard.</Body>
+            <Body muted>Prochain palier : {dash.nextTierMinutes} min.</Body>
           ) : null}
           <View style={styles.row}>
             {VAPE_DELAY_TIER_MINUTES.map((_, i) => (
@@ -236,12 +331,12 @@ export default function VapeAdaptiveScreen() {
             <Button label="Reprendre suggestions auto (retard)" variant="ghost" onPress={() => void resumeAuto('delay')} />
           ) : null}
 
-          <Text style={[styles.panelTitle, { marginTop: spacing.md }]}>Difficulté — intervalle sans vape</Text>
+          <Text style={[styles.panelTitle, { marginTop: spacing.md }]}>Intervalle sans vape</Text>
           <Body>
-            Palier actuel : {intervalTier + 1}/{VAPE_TIER_COUNT} — cible {intervalMinutesForTier(intervalTier)} min
+            Palier {intervalTier + 1}/{VAPE_TIER_COUNT} — {intervalMinutesForTier(intervalTier)} min
           </Body>
           {dash?.nextIntervalTierMinutes != null ? (
-            <Body muted>Prochain palier : {dash.nextIntervalTierMinutes} min.</Body>
+            <Body muted>Prochain : {dash.nextIntervalTierMinutes} min.</Body>
           ) : null}
           <View style={styles.row}>
             {VAPE_INTERVAL_TIER_MINUTES.map((_, i) => (
@@ -260,107 +355,16 @@ export default function VapeAdaptiveScreen() {
               onPress={() => void resumeAuto('interval')}
             />
           ) : null}
-
-          {dash?.record ? (
-            <View style={{ marginTop: spacing.sm }}>
-              <Body>
-                Meilleur record : {formatChallengeHms(dash.record.bestDurationSec)}
-                {nextRecord != null
-                  ? ` · prochain palier or : ${formatChallengeHms(nextRecord)}`
-                  : highestRecordMilestoneMinutes(recordBest)
-                    ? ' · paliers record atteints'
-                    : ''}
-              </Body>
-            </View>
-          ) : (
-            <View style={{ marginTop: spacing.sm }}>
-              <Body muted>
-                Aucun record personnel — premier palier or possible dès {VAPE_RECORD_MILESTONE_MINUTES[0]} min.
-              </Body>
-            </View>
-          )}
-        </FantasyPanel>
-
-        {running ? (
-          <View style={styles.heroCard}>
-            <Text style={styles.heroTitle}>{formatDefLabel(running.format)}</Text>
-            {targetSec != null ? (
-              <Body muted>
-                Cible du défi : {formatChallengeHms(targetSec)} — durée actuelle ci-dessous.
-              </Body>
-            ) : (
-              <Body muted>Chronomètre multi-jours — déclare quand tu vapes ou termine au palier record.</Body>
-            )}
-            <Text style={styles.timer}>{formatChallengeHms(elapsed)}</Text>
-            {running.format === 'breathing' ? (
-              <Text style={styles.phase}>{breathPhase === 'inspire' ? 'Inspire… (4 s)' : 'Expire… (6 s)'}</Text>
-            ) : null}
-            {progress != null ? (
-              <ProgressBar progress={progress} label="Vers la cible du défi" />
-            ) : null}
-            <View style={styles.row}>
-              {running.format === 'record' ? (
-                <Button label="J'ai vapoté" variant="ghost" disabled={busy} onPress={() => void close('vaped')} />
-              ) : null}
-              <Button
-                label={
-                  running.format === 'record'
-                    ? 'Terminer (palier record atteint)'
-                    : running.format === 'breathing'
-                      ? 'Séance terminée (3 min)'
-                      : "J'ai tenu — valider"
-                }
-                disabled={busy || !canValidate}
-                onPress={() => void close('completed')}
-              />
-              {running.format !== 'record' ? (
-                <Button label="Interrompu / envie cédée" variant="secondary" disabled={busy} onPress={() => void close('vaped')} />
-              ) : null}
-              <Button
-                label="Arrêter sans renseigner"
-                variant="ghost"
-                disabled={busy}
-                onPress={() => void close('unknown')}
-              />
-            </View>
-          </View>
-        ) : (
-          <FantasyPanel>
-            <Text style={styles.panelTitle}>Défis recommandés</Text>
-            {FORMATS.map((f) => {
-              const def = vapeChallengeDef(f);
-              const hint =
-                f === 'delay_craving'
-                  ? `cible ${delayMinutesForTier(delayTier)} min`
-                  : f === 'interval'
-                    ? `cible ${intervalMinutesForTier(intervalTier)} min`
-                    : f === 'breathing'
-                      ? `séance guidée ${VAPE_BREATHING_SECONDS / 60} min (4s/6s)`
-                      : `palier or dès ${VAPE_RECORD_MILESTONE_MINUTES[0]} min`;
-              return (
-                <View key={f} style={styles.recRow}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.recTitle}>{def.title}</Text>
-                    <Body muted>
-                      {def.subtitle} · {hint}
-                    </Body>
-                  </View>
-                  <Button label="Commencer" disabled={busy || !dash?.vapeActive} onPress={() => void start(f)} />
-                </View>
-              );
-            })}
-          </FantasyPanel>
-        )}
+        </CollapsibleSection>
 
         {dash && dash.history.length > 0 ? (
-          <FantasyPanel>
-            <Text style={styles.panelTitle}>Historique</Text>
+          <CollapsibleSection title="Historique récent" hint={`${dash.history.length} tentatives`}>
             {dash.history.map((h) => (
               <Text key={h.id} style={styles.histLine}>
                 {attemptLine(h.outcome, h.format, h.declaredDurationSec)}
               </Text>
             ))}
-          </FantasyPanel>
+          </CollapsibleSection>
         ) : null}
       </ScrollView>
     </Screen>
@@ -373,27 +377,18 @@ const styles = StyleSheet.create({
   heroCard: {
     marginTop: spacing.md,
     padding: spacing.lg,
-    borderRadius: 16,
-    backgroundColor: colors.mist,
+    borderRadius: 20,
+    backgroundColor: colors.cardHighlight,
     borderWidth: 1,
-    borderColor: colors.gold,
+    borderColor: colors.goldDim,
   },
-  heroTitle: { ...typography.subtitle, color: colors.gold, textAlign: 'center' },
+  heroTitle: { ...typography.subtitle, color: colors.goldBright, textAlign: 'center' },
   timer: {
-    fontSize: 52,
-    fontWeight: '700',
+    ...typography.timer,
     color: colors.ember,
     textAlign: 'center',
     marginVertical: spacing.md,
   },
-  phase: { color: colors.ink, textAlign: 'center', marginBottom: spacing.sm, fontSize: 18 },
-  recRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    marginBottom: spacing.md,
-  },
-  recTitle: { ...typography.label, color: colors.ink },
   histLine: { ...typography.caption, color: colors.ink, marginTop: 4 },
   msg: { color: colors.ember, marginTop: spacing.sm },
 });

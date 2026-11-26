@@ -29,9 +29,10 @@ export default function TabsLayout() {
           paddingTop: spacing.xs,
           paddingBottom: bottomPad,
         },
-        tabBarActiveTintColor: colors.gold,
+        tabBarActiveTintColor: colors.goldBright,
         tabBarInactiveTintColor: colors.muted,
-        tabBarLabelStyle: { fontSize: 11, fontWeight: '600', marginTop: 2 },
+        tabBarLabelStyle: { fontSize: 11, fontWeight: '700', marginTop: 2 },
+        tabBarHideOnKeyboard: true,
       }}
     >
       <Tabs.Screen

@@ -89,8 +89,10 @@ export default function AdventureScreen() {
   return (
     <Screen>
       <ScrollView contentContainerStyle={{ paddingBottom: spacing.xxl, paddingTop: spacing.sm }}>
+        <Title>Aventure</Title>
+        <Body muted>Quêtes d'abord — l'exploration textuelle reste en second plan.</Body>
         <View style={styles.tabs}>
-          <Chip label="Tableau de quêtes" selected={tab === 'quests'} onPress={() => setTab('quests')} />
+          <Chip label="Quêtes" selected={tab === 'quests'} onPress={() => setTab('quests')} />
           <Chip label="Explorer Eloria" selected={tab === 'explore'} onPress={() => setTab('explore')} />
         </View>
         {tab === 'quests' ? (

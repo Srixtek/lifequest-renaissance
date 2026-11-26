@@ -33,6 +33,7 @@ export function QuestCard({
   progress,
   onPress,
   children,
+  compact,
 }: {
   title: string;
   category?: GoalTemplate['category'];
@@ -43,6 +44,7 @@ export function QuestCard({
   progress?: number;
   onPress?: () => void;
   children?: React.ReactNode;
+  compact?: boolean;
 }) {
   const statusColor = STATUS_COLORS[status] ?? colors.muted;
   const badgeText = statusLabel ?? STATUS_LABELS[status];
@@ -69,12 +71,14 @@ export function QuestCard({
     </>
   );
 
+  const cardStyle = [styles.card, compact && styles.cardCompact];
+
   if (onPress) {
     return (
       <Pressable
         onPress={onPress}
         accessibilityRole="button"
-        style={({ pressed }) => [styles.card, pressed && { opacity: 0.92 }]}
+        style={({ pressed }) => [...cardStyle, pressed && { opacity: 0.92 }]}
       >
         <CardFrame />
         {content}
@@ -83,7 +87,7 @@ export function QuestCard({
   }
 
   return (
-    <View style={styles.card}>
+    <View style={cardStyle}>
       <CardFrame />
       {content}
     </View>
@@ -104,8 +108,13 @@ const styles = StyleSheet.create({
     padding: spacing.md,
     borderRadius: radius.lg,
     borderWidth: 1,
-    borderColor: colors.line,
+    borderColor: colors.lineBright,
     backgroundColor: colors.card,
+  },
+  cardCompact: {
+    marginTop: spacing.sm,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
   },
   frame: { position: 'absolute', top: 0, left: 0, right: 0 },
   header: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
