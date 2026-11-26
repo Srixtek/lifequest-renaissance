@@ -56,13 +56,18 @@ export async function completeOnboarding(db: Db, input: OnboardingInput): Promis
         const choice = input.sensitiveRegulation;
         if (!choice) continue;
         const plan = resolveHabitPlan('C', choice.intention, choice.targetValue, null);
-        let target: number | null = plan.defaultTarget;
-        if (choice.intention === 'measure') target = null;
-        else if (intentionRequiresNumericTarget('C', choice.intention) && choice.targetValue != null) {
-          const check = validateCreationTarget(plan.kind, String(choice.targetValue));
-          if (check.ok) target = check.value;
+        if (choice.intention === 'measure') {
+          await createHabitGoal(db, plan, null, t.defaultTier as GoalTier);
+          continue;
         }
-        await createHabitGoal(db, plan, target, t.defaultTier as GoalTier);
+        if (intentionRequiresNumericTarget('C', choice.intention)) {
+          if (choice.targetValue == null) continue;
+          const check = validateCreationTarget(plan.kind, String(choice.targetValue));
+          if (!check.ok) continue;
+          await createHabitGoal(db, plan, check.value, t.defaultTier as GoalTier);
+          continue;
+        }
+        await createHabitGoal(db, plan, plan.defaultTarget, t.defaultTier as GoalTier);
         continue;
       }
       const goalId = createId('goal');

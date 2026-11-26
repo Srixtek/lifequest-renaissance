@@ -7,6 +7,7 @@ import { colors, spacing } from '@/src/design-system/theme';
 import { useAppStore } from '@/src/state/appStore';
 import { getDb } from '@/src/data/db/client';
 import { coverageLabel, goalChart, type GoalStats } from '@/src/domain/services/statsService';
+import { publicGoalTitle } from '@/src/domain/content/goalDisplay';
 
 export default function StatsScreen() {
   const goals = useAppStore((s) => s.goals);
@@ -46,9 +47,12 @@ export default function StatsScreen() {
           <Chip label="30 jours" selected={window === 30} onPress={() => setWindow(30)} />
         </View>
 
-        {stats.map((s) => (
+        {stats.map((s) => {
+          const goal = goals.find((g) => g.id === s.goalId);
+          const displayTitle = goal ? publicGoalTitle(goal) : s.title;
+          return (
           <View key={s.goalId} style={styles.card}>
-            <Text style={styles.goalTitle}>{s.title}</Text>
+            <Text style={styles.goalTitle}>{displayTitle}</Text>
             <Body muted>{coverageLabel(s)}</Body>
             {s.followWithoutXp ? (
               <Body muted>
@@ -85,7 +89,8 @@ export default function StatsScreen() {
               </SvgText>
             </Svg>
           </View>
-        ))}
+          );
+        })}
       </ScrollView>
     </Screen>
   );

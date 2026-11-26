@@ -77,8 +77,7 @@ export default function OnboardingScreen() {
           sensitiveRegulation = { intention: 'measure', targetValue: null };
         } else if (intentionRequiresNumericTarget('C', sensitiveIntention)) {
           const raw = sensitiveTarget.trim();
-          const plan = resolveHabitPlan('C', sensitiveIntention, null, null);
-          const n = raw ? Number(raw.replace(',', '.')) : (plan.defaultTarget ?? NaN);
+          const n = raw ? Number(raw.replace(',', '.')) : NaN;
           if (!Number.isFinite(n) || n <= 0) {
             setError('Indique une cible quotidienne positive, ou choisis « Mesurer ».');
             return;
@@ -176,9 +175,7 @@ export default function OnboardingScreen() {
                   selected={sensitiveIntention === opt.id}
                   onPress={() => {
                     setSensitiveIntention(opt.id);
-                    const plan = resolveHabitPlan('C', opt.id, null, null);
-                    if (plan.defaultTarget != null) setSensitiveTarget(String(plan.defaultTarget));
-                    else setSensitiveTarget('');
+                    setSensitiveTarget('');
                   }}
                 />
               ))}
