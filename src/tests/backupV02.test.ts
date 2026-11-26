@@ -27,5 +27,7 @@ describe('backup v0.2 tables', () => {
     expect(calls.some((s: string) => s.includes('daily_reward_days'))).toBe(true);
     expect(calls.some((s: string) => s.includes('daily_reward_goals'))).toBe(true);
     expect(calls.some((s: string) => s.includes('challenge_sessions'))).toBe(true);
+    expect(calls.some((s: string) => s.includes('kingdom_buildings'))).toBe(true);
+    expect(calls.some((s: string) => s.includes('kingdom_combat'))).toBe(true);
   });
 });

@@ -26,6 +26,8 @@ const TABLES = [
   'adaptive_challenge_state',
   'adaptive_challenge_attempts',
   'adaptive_challenge_records',
+  'kingdom_buildings',
+  'kingdom_combat',
 ] as const;
 
 export interface BackupPreview {
@@ -135,6 +137,8 @@ export async function importBackup(db: Db, uri: string): Promise<BackupPreview> 
     await db.execAsync(`DELETE FROM character_progress`);
     await db.execAsync(`DELETE FROM adventure_state`);
     await db.execAsync(`DELETE FROM equipment_slots`);
+    await db.execAsync(`DELETE FROM kingdom_buildings`);
+    await db.execAsync(`DELETE FROM kingdom_combat`);
 
     for (const t of TABLES) {
       const rows = data[t] ?? [];
