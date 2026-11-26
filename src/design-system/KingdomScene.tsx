@@ -14,15 +14,20 @@ type Props = {
 
 const PIXEL = 3;
 
-export function KingdomScene({ forgeLevel, onZone, height = 240 }: Props) {
+export function KingdomScene({ forgeLevel, onZone, height = 268 }: Props) {
   const forgeGlow = forgeLevel >= 2 ? colors.goldBright : forgeLevel >= 1 ? colors.gold : colors.muted;
   const emberOpacity = forgeLevel >= 2 ? 1 : forgeLevel >= 1 ? 0.85 : 0.4;
 
   return (
     <View style={[styles.wrap, { height }]}>
       <View style={[StyleSheet.absoluteFill, styles.groundRow]}>
-        {Array.from({ length: 24 }).map((_, i) => (
-          <Image key={`g${i}`} source={KENNEY.terrainGrass} style={styles.grassTile} resizeMode="stretch" />
+        {Array.from({ length: 16 }).map((_, i) => (
+          <Image
+            key={`g${i}`}
+            source={i % 5 === 0 ? KENNEY.terrainPath : KENNEY.terrainGrass}
+            style={[styles.groundTile, i % 2 === 0 && styles.groundTileAlt]}
+            resizeMode="stretch"
+          />
         ))}
       </View>
       <Svg width="100%" height={height} style={StyleSheet.absoluteFill} pointerEvents="none">
@@ -104,8 +109,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.line,
   },
-  groundRow: { flexDirection: 'row', alignItems: 'flex-end', bottom: 0, height: 48 },
-  grassTile: { flex: 1, height: 24, opacity: 0.9 },
+  groundRow: { flexDirection: 'row', flexWrap: 'wrap', alignContent: 'flex-end', alignItems: 'flex-end', bottom: 0, height: 56, paddingHorizontal: 4 },
+  groundTile: { width: '6.25%', height: 28, opacity: 0.92 },
+  groundTileAlt: { opacity: 0.78 },
   forgeCluster: { position: 'absolute', alignItems: 'center' },
   arenaCluster: { position: 'absolute', alignItems: 'center' },
   ember: {

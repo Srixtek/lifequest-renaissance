@@ -51,7 +51,7 @@ suite('006B — combat visuel 2.0', () => {
     await startCombat(t.db, MIST_WOLF_ID);
     const view = await getKingdomView(t.db);
     expect(view.combat.enemyId).toBe(MIST_WOLF_ID);
-    expect(view.combat.enemyHpMax).toBe(18);
+    expect(view.combat.enemyHpMax).toBe(24);
     await performCombatAction(t.db, 'attack', view.combat.turnNumber, view.combat.updatedAt);
     const mid = await getKingdomView(t.db);
     expect(mid.combat.enemyId).toBe(MIST_WOLF_ID);

@@ -54,11 +54,15 @@ async function setClass(t: TestDb, classId: ClassId) {
 
 function pickOffensiveAction(classId: ClassId, view: Awaited<ReturnType<typeof getKingdomView>>) {
   const c = view.combat;
+  if (classId === 'sage') {
+    if (c.enemyIntent === 'heavy') return 'defend' as const;
+    if (skillAffordable(c)) return 'skill' as const;
+    return 'attack' as const;
+  }
   if (c.enemyIntent === 'heavy') {
     if (classId === 'gardien' && skillAffordable(c)) return 'skill' as const;
     return 'defend' as const;
   }
-  if (classId === 'sage' && c.heroHp < c.heroHpMax * 0.6 && skillAffordable(c)) return 'skill' as const;
   if ((classId === 'rodeur' || classId === 'artisan') && skillAffordable(c)) return 'skill' as const;
   if (c.concentration === 1 && c.enemyIntent === 'brace') return 'attack' as const;
   if (c.concentration < 2 && c.enemyIntent !== 'normal') return 'defend' as const;

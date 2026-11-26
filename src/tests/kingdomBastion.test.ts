@@ -64,15 +64,15 @@ suite('006A — bastion royaume', () => {
     expect(row?.version).toBe(8);
   });
 
-  test('moteur combat pur : déterministe, victoire en 4–8 tours (attaque seule)', () => {
+  test('moteur combat pur : attaque seule mène à la défaite (tactique requise)', () => {
     let state = createInitialCombat(0);
     const stats = { baseDamage: HERO_BASE_DAMAGE, forgeLevel: 0, classId: 'rodeur' as const };
-  let turns = 0;
+    let turns = 0;
     while (!state.outcome && turns < 12) {
       state = applyPlayerAction(state, 'attack', stats);
       turns += 1;
     }
-    expect(state.outcome).toBe('victory');
+    expect(state.outcome).toBe('defeat');
     expect(turns).toBeGreaterThanOrEqual(4);
     expect(turns).toBeLessThanOrEqual(8);
   });

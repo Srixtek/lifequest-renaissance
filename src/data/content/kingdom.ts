@@ -24,6 +24,10 @@ export const GUARDIAN_DEFEND_FACTOR = 0.25;
 /** Atténuation quand l'ennemi se prépare (brace). */
 export const ENEMY_BRACE_DAMAGE_FACTOR = 0.35;
 export const ENEMY_BRACE_CHIP_DAMAGE = 1;
+/** Bonus si le joueur attaque alors qu'une frappe lourde était annoncée. */
+export const RECKLESS_HEAVY_BONUS = 5;
+/** Contre-attaque si le joueur attaque pendant une préparation. */
+export const RECKLESS_BRACE_BONUS = 3;
 
 export interface EnemyDef {
   id: EnemyId;
@@ -38,7 +42,7 @@ export const ENEMY_DEFS: Record<EnemyId, EnemyDef> = {
   [THORN_GUARDIAN_ID]: {
     id: THORN_GUARDIAN_ID,
     name: THORN_GUARDIAN_NAME,
-    baseHp: 24,
+    baseHp: 25,
     normalDamage: 4,
     heavyDamage: 8,
     intentPattern: ['normal', 'heavy', 'brace', 'normal'],
@@ -46,10 +50,10 @@ export const ENEMY_DEFS: Record<EnemyId, EnemyDef> = {
   [MIST_WOLF_ID]: {
     id: MIST_WOLF_ID,
     name: MIST_WOLF_NAME,
-    baseHp: 18,
-    normalDamage: 3,
-    heavyDamage: 6,
-    intentPattern: ['normal', 'normal', 'heavy', 'normal'],
+    baseHp: 24,
+    normalDamage: 4,
+    heavyDamage: 8,
+    intentPattern: ['normal', 'normal', 'heavy', 'brace'],
   },
 };
 

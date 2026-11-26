@@ -10,6 +10,8 @@ import {
   GUARDIAN_DEFEND_FACTOR,
   HERO_BASE_DAMAGE,
   HERO_BASE_HP,
+  RECKLESS_BRACE_BONUS,
+  RECKLESS_HEAVY_BONUS,
   SKILL_CONCENTRATION_COST,
   THORN_GUARDIAN_ID,
   type EnemyId,
@@ -223,7 +225,14 @@ export function applyPlayerAction(
   }
 
   const resolvingIntent = next.enemyIntent;
-  const enemyDmg = enemyDamage(def, resolvingIntent, next.heroGuarding, guardianSkillGuard);
+  let enemyDmg = enemyDamage(def, resolvingIntent, next.heroGuarding, guardianSkillGuard);
+  if (action === 'attack' && resolvingIntent === 'heavy') {
+    enemyDmg += RECKLESS_HEAVY_BONUS;
+    next.log.push("Tu ignores l'avertissement : la frappe est encore plus violente.");
+  } else if (action === 'attack' && resolvingIntent === 'brace') {
+    enemyDmg += RECKLESS_BRACE_BONUS;
+    next.log.push("L'ennemi exploite ta précipitation.");
+  }
   if (resolvingIntent === 'brace') {
     next.log.push(`${def.name} se prépare et observe ton prochain coup.`);
   }

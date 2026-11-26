@@ -51,16 +51,22 @@ export function QuestBoardCard({
           <Text style={[styles.badgeText, { color: badge.color }]}>{badge.label}</Text>
         </View>
       </View>
-      {state === 'accepted' || state === 'ready' ? (
-        <ProgressBar progress={progress.current / progress.target} label={progress.label} height={8} />
+      <View style={styles.progressBlock}>
+        {state === 'accepted' || state === 'ready' ? (
+          <ProgressBar progress={progress.current / progress.target} label={progress.label} height={8} />
+        ) : (
+          <Text style={styles.rewardIdle}>Récompense : {def.rewardGold} or</Text>
+        )}
+        {state === 'accepted' || state === 'ready' ? (
+          <Text style={styles.reward}>{state === 'ready' ? `Prête · ${def.rewardGold} or` : `+${def.rewardGold} or`}</Text>
+        ) : null}
+      </View>
+      {state !== 'claimed' ? (
+        <CollapsibleSection title="Détails" hint="Contexte">
+          <Text style={styles.desc}>{def.description}</Text>
+          <Text style={styles.objective}>{def.objective}</Text>
+        </CollapsibleSection>
       ) : null}
-      <Text style={styles.reward}>
-        {state === 'claimed' ? `Récompense reçue : ${def.rewardGold} or` : `+${def.rewardGold} or`}
-      </Text>
-      <CollapsibleSection title="Détails de la quête" hint="Voir le contexte">
-        <Text style={styles.desc}>{def.description}</Text>
-        <Text style={styles.objective}>Objectif complet : {def.objective}</Text>
-      </CollapsibleSection>
       {state === 'available' ? (
         <>
           <Button label="Accepter la quête" onPress={onAccept} disabled={busy || !!acceptDisabledReason} />
@@ -84,6 +90,8 @@ const styles = StyleSheet.create({
   badgeText: { fontSize: 11, fontWeight: '600' },
   desc: { ...typography.body, color: colors.ink },
   objective: { ...typography.caption, color: colors.muted, marginTop: spacing.sm },
-  reward: { ...typography.caption, color: colors.gold, fontWeight: '700', marginTop: spacing.sm },
+  progressBlock: { marginTop: spacing.sm, gap: 4 },
+  reward: { ...typography.caption, color: colors.gold, fontWeight: '700', textAlign: 'right' },
+  rewardIdle: { ...typography.caption, color: colors.gold, fontWeight: '700' },
   hint: { ...typography.caption, color: colors.muted, marginTop: spacing.xs },
 });

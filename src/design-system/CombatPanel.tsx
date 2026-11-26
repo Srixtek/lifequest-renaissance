@@ -78,6 +78,15 @@ export function CombatPanel({
   return (
     <FantasyPanel>
       <View style={[styles.stage, flash === 'hit' && !reduceMotion && styles.flashHit, flash === 'defend' && !reduceMotion && styles.flashDefend]}>
+        <View style={styles.floorRow} pointerEvents="none">
+          {Array.from({ length: 12 }).map((_, i) => (
+            <Image
+              key={`floor-${i}`}
+              source={require('../../assets/kingdom/kenney/terrain_path.png')}
+              style={styles.floorTile}
+            />
+          ))}
+        </View>
         <Image source={require('../../assets/kingdom/kenney/combat_backdrop.png')} style={styles.backdrop} resizeMode="cover" />
         <View style={styles.fighters}>
           <FighterSprite source={heroSprite(classId)} label={CLASS_LABELS[classId]} side="left" />
@@ -88,19 +97,20 @@ export function CombatPanel({
         <HpBar inScene current={combat.enemyHp} max={combat.enemyHpMax} tint={colors.warn} style={styles.enemyHp} />
       </View>
 
-      <Text style={styles.title}>{enemyDisplayName(enemyId)}</Text>
+      <View style={styles.telegraphRow}>
+        <Text style={styles.title}>{enemyDisplayName(enemyId)}</Text>
+        <ConcentrationMeter value={combat.concentration} max={CONCENTRATION_MAX} />
+      </View>
       <View style={[styles.intentBadge, { borderColor: intent.tint }]}>
         <Text style={[styles.intentText, { color: intent.tint }]}>{intent.label}</Text>
       </View>
-      <ConcentrationMeter value={combat.concentration} max={CONCENTRATION_MAX} />
       <View style={styles.bars}>
         <HpBar label="Héros" current={combat.heroHp} max={combat.heroHpMax} tint={colors.emerald} />
         <HpBar label="Ennemi" current={combat.enemyHp} max={combat.enemyHpMax} tint={colors.warn} />
       </View>
-      <Body muted>
-        Tour {combat.turnNumber} · Concentration {combat.concentration}/{CONCENTRATION_MAX} (compétence :{' '}
-        {SKILL_CONCENTRATION_COST})
-      </Body>
+      <View style={styles.turnLine}>
+        <Body muted>Tour {combat.turnNumber} · compétence : {SKILL_CONCENTRATION_COST} concentration</Body>
+      </View>
       {combat.outcome ? (
         <View style={[styles.outcome, combat.outcome === 'victory' ? styles.winStage : styles.loseStage]}>
           <Text style={combat.outcome === 'victory' ? styles.win : styles.lose}>
@@ -109,14 +119,20 @@ export function CombatPanel({
         </View>
       ) : (
         <View style={styles.actions}>
-          <Button label="Attaquer" onPress={onAttack} disabled={busy} />
-          <Button label="Défendre" variant="ghost" onPress={onDefend} disabled={busy} />
-          <Button
-            label={skillReady ? skillLabel : `${skillLabel} (${SKILL_CONCENTRATION_COST} conc.)`}
-            variant="ghost"
-            onPress={onSkill}
-            disabled={busy || !skillReady}
-          />
+          <View style={styles.actionRow}>
+            <View style={styles.actionPrimary}>
+              <Button label="Attaquer" onPress={onAttack} disabled={busy} />
+            </View>
+            <View style={styles.actionSide}>
+              <Button label="Défendre" variant="ghost" onPress={onDefend} disabled={busy} />
+              <Button
+                label={skillReady ? skillLabel : `${skillLabel} (${SKILL_CONCENTRATION_COST})`}
+                variant="ghost"
+                onPress={onSkill}
+                disabled={busy || !skillReady}
+              />
+            </View>
+          </View>
         </View>
       )}
       {combat.outcome && onLeave ? (
@@ -142,8 +158,8 @@ function FighterSprite({
   label: string;
   side: 'left' | 'right';
 }) {
-  const scale = 4;
-  const size = 16 * 3 * (scale / 3);
+  const scale = 4.5;
+  const size = Math.round(16 * 3 * (scale / 3));
   return (
     <View style={[styles.fighter, side === 'right' && { alignItems: 'flex-end' }]}>
       <Image source={source} style={{ width: size, height: size }} />
@@ -211,13 +227,32 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     overflow: 'hidden',
     marginBottom: spacing.sm,
-    minHeight: 140,
+    minHeight: 172,
     borderWidth: 1,
     borderColor: colors.line,
   },
   flashHit: { borderColor: colors.warn },
   flashDefend: { borderColor: colors.emeraldDim },
-  backdrop: { ...StyleSheet.absoluteFill, opacity: 0.35 },
+  floorRow: {
+    ...StyleSheet.absoluteFill,
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    paddingBottom: 2,
+  },
+  floorTile: { width: 28, height: 28, opacity: 0.55, resizeMode: 'stretch' as const },
+  backdrop: { ...StyleSheet.absoluteFill, opacity: 0.22 },
+  telegraphRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+    marginBottom: spacing.xs,
+  },
+  turnLine: { marginBottom: spacing.xs },
+  actionRow: { flexDirection: 'row', gap: spacing.sm, alignItems: 'stretch' },
+  actionPrimary: { flex: 1.1 },
+  actionSide: { flex: 1, gap: spacing.xs },
   fighters: {
     flexDirection: 'row',
     alignItems: 'flex-end',
@@ -242,7 +277,7 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
   },
   intentText: { ...typography.caption, fontWeight: '700' },
-  concRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.sm },
+  concRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   concLabel: { ...typography.caption, color: colors.muted },
   concDots: { flexDirection: 'row', gap: 6 },
   concDot: { width: 10, height: 10, borderRadius: 5, borderWidth: 1, borderColor: colors.line },
@@ -258,7 +293,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   hpFill: { height: '100%', borderRadius: 4 },
-  actions: { gap: spacing.xs, marginVertical: spacing.sm },
+  actions: { marginVertical: spacing.sm },
   log: { maxHeight: 120, marginTop: spacing.sm },
   logLine: { ...typography.caption, color: colors.muted, marginBottom: 2 },
   outcome: { borderRadius: 8, padding: spacing.sm, marginVertical: spacing.sm },
