@@ -53,11 +53,8 @@ function formatObjectiveLimit(target: number, unit: string | null, kind: GoalKin
   if (kind === 'limit' || kind === 'reduce') {
     return `Plafond du jour : ${target}${u} maximum`;
   }
-  if (kind === 'duration') {
+  if (kind === 'duration' || kind === 'quantity') {
     return `Objectif du jour : au moins ${target}${u}`;
-  }
-  if (kind === 'quantity') {
-    return 'Suivi neutre — pas de plafond ni de minimum imposé';
   }
   return `Repère : ${target}${u}`;
 }
@@ -90,22 +87,39 @@ function binaryLabels(goal: GoalDefinition, ver: ActiveHabitVersion | undefined)
           : 'consommation';
     return {
       prompt: `Aujourd'hui, as-tu consommé (${substance}) ?`,
-      success: 'Journée sans consommation',
-      miss: 'Consommation déclarée',
+      success: 'Journée sans consommation enregistrée',
+      miss: 'Consommation enregistrée',
     };
   }
   if (ver?.scheduleKind === 'weekly') {
     return {
       prompt: "As-tu appelé un proche aujourd'hui ?",
-      success: 'Appel fait',
+      success: 'Appel enregistré',
       miss: "Pas d'appel aujourd'hui",
     };
   }
   return {
     prompt: "As-tu réalisé cette habitude aujourd'hui ?",
-    success: 'Fait',
-    miss: 'Pas fait',
+    success: 'Fait — enregistré',
+    miss: 'Pas fait — enregistré',
   };
+}
+
+function todayBinaryValueLabel(
+  goal: GoalDefinition,
+  ver: ActiveHabitVersion | undefined,
+  status: TrackingStatus,
+): string {
+  if (goal.status === 'paused' || status === 'paused') {
+    return 'En pause — pas de saisie attendue';
+  }
+  if (status === 'unknown') {
+    return 'Pas encore renseigné';
+  }
+  const binary = binaryLabels(goal, ver);
+  if (status === 'success') return binary.success;
+  if (status === 'miss') return binary.miss;
+  return 'Renseigné';
 }
 
 function dailyQuestionFor(goal: GoalDefinition, ver: ActiveHabitVersion | undefined): string {
@@ -163,7 +177,13 @@ function dailyQuestionFor(goal: GoalDefinition, ver: ActiveHabitVersion | undefi
     return `Combien de minutes aujourd'hui ?${ver?.target != null ? ' (minimum visé)' : ''}`;
   }
 
-  if (goal.kind === 'quantity' || goal.followWithoutXp) {
+  if (goal.kind === 'quantity') {
+    if (goal.followWithoutXp) {
+      return `Valeur du jour${unitSuffix(goal.unit)} — suivi neutre`;
+    }
+    return `Combien${unitSuffix(goal.unit)} aujourd'hui ? (minimum visé)`;
+  }
+  if (goal.followWithoutXp) {
     return `Valeur du jour${unitSuffix(goal.unit)} — suivi neutre`;
   }
 
@@ -203,8 +223,11 @@ function objectiveLineFor(
     return 'Confirmation quotidienne (oui / non)';
   }
 
-  if (goal.kind === 'quantity') {
+  if (goal.kind === 'quantity' && goal.followWithoutXp) {
     return 'Suivi neutre — note la valeur du jour';
+  }
+  if (goal.kind === 'quantity') {
+    return 'Minimum du jour — note la valeur atteinte';
   }
 
   return 'Pas de repère chiffré — déclare ta journée';
@@ -252,13 +275,7 @@ export function presentHabitCard(
     dailyQuestion: dailyQuestionFor(goal, ver),
     todayValueLabel: usesNumericLog(goal.kind)
       ? todayNumericValue(goal, status, tracking?.value)
-      : status === 'unknown'
-        ? 'Pas encore renseigné'
-        : status === 'success'
-          ? 'Déclaré : oui'
-          : status === 'miss'
-            ? 'Déclaré : non'
-            : 'Renseigné',
+      : todayBinaryValueLabel(goal, ver, status),
     inputPlaceholder: inputPlaceholderFor(goal),
     inputAccessibilityLabel: `Saisie pour ${publicGoalTitle(goal)}`,
     primaryLogLabel: 'Enregistrer',
@@ -329,7 +346,7 @@ export function customCreationTargetPlaceholder(kind: GoalKind): string {
     case 'duration':
       return 'Minimum quotidien (minutes)';
     case 'quantity':
-      return 'Repère facultatif (suivi neutre)';
+      return 'Minimum quotidien (nombre > 0)';
     default:
       return 'Valeur';
   }

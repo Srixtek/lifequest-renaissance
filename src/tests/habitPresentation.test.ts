@@ -1,4 +1,8 @@
-import { presentHabitCard, setupTargetCopy } from '../domain/content/habitPresentation';
+import {
+  customCreationTargetPlaceholder,
+  presentHabitCard,
+  setupTargetCopy,
+} from '../domain/content/habitPresentation';
 import type { GoalDefinition } from '../domain/models/types';
 
 function goal(partial: Partial<GoalDefinition> & Pick<GoalDefinition, 'kind'>): GoalDefinition {
@@ -49,7 +53,17 @@ describe('presentHabitCard — vape', () => {
     const g = goal({ kind: 'abstinence', templateId: 'vape_sessions', unit: 'séances' });
     const card = presentHabitCard(g, { ...dailyVer, target: null }, undefined, 0);
     expect(card.objectiveLine).toMatch(/sans consommation/);
-    expect(card.binarySuccessLabel).toBe('Journée sans consommation');
+    expect(card.binarySuccessLabel).toBe('Journée sans consommation enregistrée');
+    expect(card.binaryMissLabel).toBe('Consommation enregistrée');
+  });
+
+  test('abstinence today label never uses Déclaré : oui', () => {
+    const g = goal({ kind: 'abstinence', templateId: 'vape_sessions', unit: 'séances' });
+    const ok = presentHabitCard(g, { ...dailyVer, target: null }, { status: 'success', value: 0 }, 0);
+    const ko = presentHabitCard(g, { ...dailyVer, target: null }, { status: 'miss', value: 1 }, 0);
+    expect(ok.todayValueLabel).toBe('Journée sans consommation enregistrée');
+    expect(ko.todayValueLabel).toBe('Consommation enregistrée');
+    expect(ok.todayValueLabel).not.toMatch(/Déclaré/);
   });
 });
 
@@ -109,6 +123,43 @@ describe('presentHabitCard — famille hebdo', () => {
     );
     expect(card.objectiveLine).toBe('1/2 jours avec appel cette semaine');
     expect(card.weeklyHint).toBeTruthy();
+    expect(card.binarySuccessLabel).toBe('Appel enregistré');
+  });
+
+  test('weekly call states', () => {
+    const g = goal({
+      kind: 'habit',
+      templateId: 'call_family',
+      title: 'Famille et proches — appels',
+      followWithoutXp: true,
+    });
+    const ver = { unit: null, target: null, scheduleKind: 'weekly' as const, weeklyTarget: 2 };
+    expect(
+      presentHabitCard(g, ver, { status: 'success', value: null }, 1).todayValueLabel,
+    ).toBe('Appel enregistré');
+    expect(presentHabitCard(g, ver, { status: 'miss', value: null }, 0).todayValueLabel).toBe(
+      "Pas d'appel aujourd'hui",
+    );
+    expect(presentHabitCard(g, ver, { status: 'unknown', value: null }, 0).todayValueLabel).toBe(
+      'Pas encore renseigné',
+    );
+  });
+
+  test('weekly habit paused', () => {
+    const g = goal({
+      kind: 'habit',
+      templateId: 'call_family',
+      status: 'paused',
+      followWithoutXp: true,
+    });
+    const card = presentHabitCard(
+      g,
+      { unit: null, target: null, scheduleKind: 'weekly', weeklyTarget: 2 },
+      { status: 'unknown', value: null },
+      0,
+    );
+    expect(card.todayValueLabel).toMatch(/En pause/);
+    expect(card.objectiveLine).toMatch(/pause/i);
   });
 });
 
@@ -179,5 +230,29 @@ describe('setupTargetCopy', () => {
 
   test('stop has no numeric field copy', () => {
     expect(setupTargetCopy('B', 'stop')).toBeNull();
+  });
+});
+
+describe('presentHabitCard — quantity personnalisée', () => {
+  test('followWithoutXp stays neutral', () => {
+    const g = goal({ kind: 'quantity', followWithoutXp: true, unit: 'fois' });
+    const card = presentHabitCard(g, { ...dailyVer, target: null }, undefined, 0);
+    expect(card.objectiveLine).toMatch(/Suivi neutre/);
+    expect(card.dailyQuestion).toMatch(/suivi neutre/);
+  });
+
+  test('with target shows minimum not neutral', () => {
+    const g = goal({ kind: 'quantity', followWithoutXp: false, unit: 'fois' });
+    const card = presentHabitCard(g, { ...dailyVer, target: 3 }, undefined, 0);
+    expect(card.objectiveLine).toMatch(/au moins 3/);
+    expect(card.dailyQuestion).toMatch(/minimum visé/);
+  });
+});
+
+describe('customCreationTargetPlaceholder', () => {
+  test('quantity is required not facultatif', () => {
+    const p = customCreationTargetPlaceholder('quantity');
+    expect(p).not.toMatch(/facultatif/i);
+    expect(p).toMatch(/Minimum|>/);
   });
 });

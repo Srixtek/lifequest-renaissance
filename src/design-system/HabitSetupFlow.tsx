@@ -66,11 +66,15 @@ export function HabitSetupFlow({
       null,
       intentionRequiresWeeklyCount(intention) ? Number(weeklyDraft) : null,
     );
-    let targetValue: number | null = plan.defaultTarget;
+    const categoryCLimiter = category === 'C' && intention === 'reduce';
+    let targetValue: number | null = categoryCLimiter ? null : plan.defaultTarget;
     if (intention === 'measure') {
       targetValue = null;
     } else if (intentionRequiresNumericTarget(category, intention)) {
-      const check = validateCreationTarget(plan.kind, targetDraft || String(plan.defaultTarget ?? ''));
+      const rawTarget = categoryCLimiter
+        ? targetDraft
+        : targetDraft || String(plan.defaultTarget ?? '');
+      const check = validateCreationTarget(plan.kind, rawTarget);
       if (!check.ok) {
         onFeedback(check.error);
         return;
@@ -152,8 +156,13 @@ export function HabitSetupFlow({
                 onPress={() => {
                   setIntention(opt.id);
                   const plan = resolveHabitPlan(category, opt.id, null, null);
-                  if (plan.defaultTarget != null) setTargetDraft(String(plan.defaultTarget));
-                  else setTargetDraft('');
+                  if (category === 'C' && opt.id === 'reduce') {
+                    setTargetDraft('');
+                  } else if (plan.defaultTarget != null) {
+                    setTargetDraft(String(plan.defaultTarget));
+                  } else {
+                    setTargetDraft('');
+                  }
                   setStep('target');
                 }}
               />
