@@ -69,6 +69,22 @@ export async function grantItem(db: Conn, itemId: string): Promise<void> {
   }
 }
 
+/** Trophées uniques : une seule unité en inventaire (idempotent). */
+export async function grantItemOnce(db: Conn, itemId: string): Promise<'granted' | 'duplicate'> {
+  const existing = await db.getFirstAsync<{ quantity: number }>(
+    'SELECT quantity FROM inventory_items WHERE item_id = ?',
+    itemId,
+  );
+  if (existing) return 'duplicate';
+  await db.runAsync(
+    `INSERT INTO inventory_items (id, item_id, quantity, acquired_at) VALUES (?, ?, 1, ?)`,
+    `inv_${itemId}`,
+    itemId,
+    new Date().toISOString(),
+  );
+  return 'granted';
+}
+
 export async function listEquipment(db: Conn): Promise<EquipmentSlot[]> {
   const rows = await db.getAllAsync<any>('SELECT * FROM equipment_slots');
   return rows.map((r) => ({ slot: r.slot, itemId: r.item_id }));
@@ -128,6 +144,41 @@ export async function getGoldBalance(db: Conn): Promise<number> {
  * Crédite de l'or une seule fois par clé d'idempotence. Appeler dans une transaction du parent.
  * Un montant non entier ou <= 0 est refusé (l'or n'est pas dépensable en 004C-1).
  */
+export type SpendGoldResult = 'spent' | 'insufficient' | 'duplicate';
+
+/** Débit d'or atomique : solde vérifié, montant strictement positif, ledger négatif. */
+export async function spendGold(
+  db: Conn,
+  amount: number,
+  reason: string,
+  idempotencyKey: string,
+  createdAt: string = new Date().toISOString(),
+): Promise<SpendGoldResult> {
+  if (!Number.isInteger(amount) || amount <= 0) throw new Error('Montant de dépense invalide');
+  const existing = await db.getFirstAsync<{ id: string }>(
+    'SELECT id FROM wallet_ledger WHERE idempotency_key = ?',
+    idempotencyKey,
+  );
+  if (existing) return 'duplicate';
+  const balance = await getGoldBalance(db);
+  if (balance < amount) return 'insufficient';
+  try {
+    await db.runAsync(
+      `INSERT INTO wallet_ledger (id, resource, amount, reason, idempotency_key, created_at)
+       VALUES (?, 'gold', ?, ?, ?, ?)`,
+      createId('wal'),
+      -amount,
+      reason,
+      idempotencyKey,
+      createdAt,
+    );
+    return 'spent';
+  } catch (err: unknown) {
+    if (String((err as Error)?.message ?? err).toLowerCase().includes('unique')) return 'duplicate';
+    throw err;
+  }
+}
+
 export async function addGold(
   db: Conn,
   amount: number,

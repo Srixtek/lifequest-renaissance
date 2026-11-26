@@ -28,6 +28,13 @@ export const ITEMS: Record<string, ItemDef> = {
     slot: 'trinket',
     usefulEffect: null,
   },
+  bastion_victory_banner: {
+    id: 'bastion_victory_banner',
+    name: 'Bannière du Premier Bastion',
+    description: 'Trophée remporté en repoussant le Gardien des Ronces.',
+    slot: null,
+    usefulEffect: null,
+  },
 };
 
 export const STARTER_ITEM_ID = 'lantern';

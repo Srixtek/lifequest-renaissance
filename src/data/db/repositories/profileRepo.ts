@@ -1,5 +1,8 @@
 import type { Db } from '../client';
+import type { SqlRunner } from '../sqlRunner';
 import type { ClassId, Profile } from '../../../domain/models/types';
+
+type Conn = Db | SqlRunner;
 
 function mapRow(r: any): Profile {
   return {
@@ -14,7 +17,7 @@ function mapRow(r: any): Profile {
   };
 }
 
-export async function getProfile(db: Db): Promise<Profile | null> {
+export async function getProfile(db: Conn): Promise<Profile | null> {
   const row = await db.getFirstAsync<any>('SELECT * FROM profiles LIMIT 1');
   return row ? mapRow(row) : null;
 }
