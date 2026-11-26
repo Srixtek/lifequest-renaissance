@@ -4,6 +4,7 @@ import { useFocusEffect } from 'expo-router';
 import { Body, Button, Chip, Screen, Title } from '@/src/design-system/ui';
 import { FantasyPanel } from '@/src/design-system/FantasyPanel';
 import { QuestBoardCard } from '@/src/design-system/QuestBoardCard';
+import { EmptyState } from '@/src/design-system/QuestCard';
 import { KingdomScene, type KingdomZone } from '@/src/design-system/KingdomScene';
 import { CombatPanel } from '@/src/design-system/CombatPanel';
 import { colors, spacing, typography } from '@/src/design-system/theme';
@@ -131,6 +132,7 @@ export default function AdventureScreen() {
   }
 
   const byState = (...states: QuestBoardEntry['state'][]) => board.entries.filter((e) => states.includes(e.state));
+  const inProgress = [...byState('ready'), ...byState('accepted')];
   const full = board.acceptedCount >= board.maxAccepted;
   const renderCards = (entries: QuestBoardEntry[]) =>
     entries.map((e) => (
@@ -157,7 +159,11 @@ export default function AdventureScreen() {
         <View style={styles.tabs}>
           <Chip label="Bastion" selected={tab === 'royaume'} onPress={() => setTab('royaume')} />
           <Chip label="Quêtes" selected={tab === 'quests'} onPress={() => setTab('quests')} />
-          <Chip label="Ancien sentier" selected={tab === 'trail'} onPress={() => setTab('trail')} />
+          <Chip
+            label="Ancien sentier"
+            selected={tab === 'trail'}
+            onPress={() => setTab('trail')}
+          />
         </View>
         {tab === 'royaume' ? (
           <>
@@ -170,6 +176,11 @@ export default function AdventureScreen() {
               </Body>
             </FantasyPanel>
             <KingdomScene forgeLevel={kingdom.forge.level} onZone={onZone} />
+            {kingdom.gold === 0 && !kingdom.combat.active && !forgeOpen && !combatOpen ? (
+              <Body muted>
+                Aucun or pour l&apos;instant : accepte une quête (onglet Quêtes), puis reviens améliorer la forge ici.
+              </Body>
+            ) : null}
             {kingdomMsg ? <Body muted>{kingdomMsg}</Body> : null}
             {forgeOpen ? (
               <FantasyPanel>
@@ -285,14 +296,27 @@ export default function AdventureScreen() {
               </Body>
             </FantasyPanel>
             {questMsg ? <Body muted>{questMsg}</Body> : null}
-            {byState('ready').length ? <Text style={styles.section}>Prêtes à réclamer</Text> : null}
-            {renderCards(byState('ready'))}
-            {byState('accepted').length ? <Text style={styles.section}>Acceptées</Text> : null}
-            {renderCards(byState('accepted'))}
-            {byState('available').length ? <Text style={styles.section}>Disponibles</Text> : null}
-            {renderCards(byState('available'))}
-            {byState('claimed').length ? <Text style={styles.section}>Terminées</Text> : null}
-            {renderCards(byState('claimed'))}
+            <Text style={styles.section}>En cours</Text>
+            {inProgress.length === 0 ? (
+              <EmptyState
+                title="Aucune quête en cours"
+                hint="Choisis une quête ci-dessous dans Disponibles, puis suis les étapes sur la carte."
+              />
+            ) : (
+              renderCards(inProgress)
+            )}
+            <Text style={styles.section}>Disponibles</Text>
+            {byState('available').length === 0 ? (
+              <Body muted>Toutes les quêtes du carnet sont acceptées ou terminées.</Body>
+            ) : (
+              renderCards(byState('available'))
+            )}
+            {byState('claimed').length ? (
+              <>
+                <Text style={[styles.section, styles.sectionSecondary]}>Terminées</Text>
+                {renderCards(byState('claimed'))}
+              </>
+            ) : null}
           </>
         ) : null}
         {tab === 'trail' ? (
@@ -338,8 +362,9 @@ export default function AdventureScreen() {
 
 const styles = StyleSheet.create({
   warn: { color: colors.warn, marginTop: spacing.sm },
-  tabs: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: spacing.sm },
+  tabs: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: spacing.sm, gap: 0 },
   section: { ...typography.label, color: colors.gold, marginTop: spacing.lg },
+  sectionSecondary: { color: colors.muted, marginTop: spacing.md },
   goldValue: { ...typography.title, color: colors.gold, marginBottom: spacing.xs },
   enemyRow: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: spacing.sm, gap: spacing.xs },
 });

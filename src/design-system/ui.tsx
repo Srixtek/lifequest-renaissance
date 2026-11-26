@@ -72,6 +72,9 @@ export function Button({
           variant === 'danger' && styles.btnTextDanger,
           variant === 'neutral' && styles.btnTextNeutral,
         ]}
+        numberOfLines={2}
+        adjustsFontSizeToFit
+        minimumFontScale={0.85}
       >
         {label}
       </Text>
@@ -123,7 +126,14 @@ export function Chip({
       accessibilityRole="button"
       accessibilityState={{ selected }}
     >
-      <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{label}</Text>
+      <Text
+        style={[styles.chipText, selected && styles.chipTextSelected]}
+        numberOfLines={2}
+        adjustsFontSizeToFit
+        minimumFontScale={0.9}
+      >
+        {label}
+      </Text>
     </Pressable>
   );
 }
@@ -213,6 +223,9 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     minHeight: 44,
     justifyContent: 'center',
+    flexGrow: 0,
+    flexShrink: 1,
+    maxWidth: '100%',
   },
   chipSelected: { backgroundColor: colors.mist, borderColor: colors.goldDim },
   chipText: { color: colors.muted },

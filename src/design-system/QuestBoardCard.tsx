@@ -5,6 +5,7 @@ import { ProgressBar } from './ProgressBar';
 import { CollapsibleSection } from './CollapsibleSection';
 import { Button } from './ui';
 import { KENNEY, QUEST_EMBLEM } from '../data/content/kingdomAssets';
+import { QUEST_HOW_TO } from '../data/content/quests';
 import { colors, radius, spacing, typography } from './theme';
 import type { QuestBoardEntry, QuestBoardState } from '@/src/domain/services/questService';
 
@@ -38,19 +39,31 @@ export function QuestBoardCard({
   const { def, state, progress } = entry;
   const badge = BADGE[state];
   const emblem = QUEST_EMBLEM[def.id] ?? KENNEY.buildingCamp;
+  const howTo = QUEST_HOW_TO[def.id];
 
   return (
     <FantasyPanel accent={state === 'ready'}>
       <View style={styles.header}>
         <Image source={emblem} style={styles.emblem} />
-        <View style={{ flex: 1 }}>
-          <Text style={styles.title}>{def.title}</Text>
-          <Text style={styles.goalLine}>{goalOneLine(def.objective)}</Text>
+        <View style={styles.headerMain}>
+          <Text style={styles.title} numberOfLines={2}>
+            {def.title}
+          </Text>
+          <Text style={styles.goalLine} numberOfLines={2}>
+            {goalOneLine(def.objective)}
+          </Text>
         </View>
         <View style={[styles.badge, { borderColor: badge.color }]}>
-          <Text style={[styles.badgeText, { color: badge.color }]}>{badge.label}</Text>
+          <Text style={[styles.badgeText, { color: badge.color }]} numberOfLines={1}>
+            {badge.label}
+          </Text>
         </View>
       </View>
+      {state !== 'claimed' && howTo ? (
+        <Text style={styles.howTo} numberOfLines={3}>
+          {howTo}
+        </Text>
+      ) : null}
       <View style={styles.progressBlock}>
         {state === 'accepted' || state === 'ready' ? (
           <ProgressBar progress={progress.current / progress.target} label={progress.label} height={8} />
@@ -62,11 +75,13 @@ export function QuestBoardCard({
         ) : null}
       </View>
       {state !== 'claimed' ? (
-        <CollapsibleSection title="Détails" hint="Contexte">
+        <CollapsibleSection title="Détails" hint="Contexte et objectif complet">
           <Text style={styles.desc}>{def.description}</Text>
           <Text style={styles.objective}>{def.objective}</Text>
         </CollapsibleSection>
-      ) : null}
+      ) : (
+        <Text style={styles.claimedReward}>+{def.rewardGold} or réclamés</Text>
+      )}
       {state === 'available' ? (
         <>
           <Button label="Accepter la quête" onPress={onAccept} disabled={busy || !!acceptDisabledReason} />
@@ -83,11 +98,31 @@ export function QuestBoardCard({
 
 const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
-  emblem: { width: 40, height: 40, marginTop: 2 },
+  emblem: { width: 40, height: 40, marginTop: 2, flexShrink: 0 },
+  headerMain: { flex: 1, flexShrink: 1, minWidth: 0 },
   title: { ...typography.subtitle, color: colors.ink },
   goalLine: { ...typography.caption, color: colors.muted, marginTop: 4 },
-  badge: { borderWidth: 1, borderRadius: radius.sm, paddingHorizontal: 8, paddingVertical: 4 },
+  badge: {
+    borderWidth: 1,
+    borderRadius: radius.sm,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    flexShrink: 0,
+    alignSelf: 'flex-start',
+    maxWidth: '36%',
+  },
   badgeText: { fontSize: 11, fontWeight: '600' },
+  howTo: {
+    ...typography.caption,
+    color: colors.ink,
+    marginTop: spacing.sm,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    backgroundColor: colors.mist,
+    borderRadius: radius.sm,
+    overflow: 'hidden',
+  },
+  claimedReward: { ...typography.caption, color: colors.muted, marginTop: spacing.sm },
   desc: { ...typography.body, color: colors.ink },
   objective: { ...typography.caption, color: colors.muted, marginTop: spacing.sm },
   progressBlock: { marginTop: spacing.sm, gap: 4 },

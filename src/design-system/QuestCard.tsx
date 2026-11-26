@@ -58,11 +58,19 @@ export function QuestCard({
           </View>
         ) : null}
         <View style={styles.headerText}>
-          <Text style={styles.title}>{title}</Text>
-          {targetLabel ? <Text style={styles.meta}>{targetLabel}</Text> : null}
+          <Text style={styles.title} numberOfLines={2}>
+            {title}
+          </Text>
+          {targetLabel ? (
+            <Text style={styles.meta} numberOfLines={2}>
+              {targetLabel}
+            </Text>
+          ) : null}
         </View>
         <View style={[styles.badge, { borderColor: statusColor }]}>
-          <Text style={[styles.badgeText, { color: statusColor }]}>{badgeText}</Text>
+          <Text style={[styles.badgeText, { color: statusColor }]} numberOfLines={1}>
+            {badgeText}
+          </Text>
         </View>
       </View>
       {valueLabel ? <Text style={styles.value}>Aujourd'hui : {valueLabel}</Text> : null}
@@ -126,7 +134,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  headerText: { flex: 1 },
+  headerText: { flex: 1, flexShrink: 1, minWidth: 0 },
   title: { ...typography.subtitle, color: colors.ink },
   meta: { ...typography.caption, color: colors.muted, marginTop: 2 },
   badge: {
@@ -134,6 +142,9 @@ const styles = StyleSheet.create({
     borderRadius: radius.sm,
     paddingHorizontal: 8,
     paddingVertical: 4,
+    flexShrink: 0,
+    alignSelf: 'flex-start',
+    maxWidth: '38%',
   },
   badgeText: { fontSize: 11, fontWeight: '600' },
   value: { ...typography.caption, color: colors.muted, marginTop: spacing.sm },

@@ -98,7 +98,9 @@ export function CombatPanel({
       </View>
 
       <View style={styles.telegraphRow}>
-        <Text style={styles.title}>{enemyDisplayName(enemyId)}</Text>
+        <Text style={styles.title} numberOfLines={2}>
+          {enemyDisplayName(enemyId)}
+        </Text>
         <ConcentrationMeter value={combat.concentration} max={CONCENTRATION_MAX} />
       </View>
       <View style={[styles.intentBadge, { borderColor: intent.tint }]}>
@@ -244,6 +246,7 @@ const styles = StyleSheet.create({
   backdrop: { ...StyleSheet.absoluteFill, opacity: 0.22 },
   telegraphRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: spacing.sm,
@@ -282,7 +285,7 @@ const styles = StyleSheet.create({
   concDots: { flexDirection: 'row', gap: 6 },
   concDot: { width: 10, height: 10, borderRadius: 5, borderWidth: 1, borderColor: colors.line },
   concDotOn: { backgroundColor: colors.gold, borderColor: colors.goldBright },
-  title: { ...typography.subtitle, color: colors.gold, marginBottom: spacing.xs },
+  title: { ...typography.subtitle, color: colors.gold, marginBottom: spacing.xs, flex: 1, flexShrink: 1, minWidth: 120 },
   bars: { gap: spacing.sm, marginBottom: spacing.sm },
   hpWrap: { marginBottom: 4 },
   hpLabel: { ...typography.caption, color: colors.muted, marginBottom: 2 },

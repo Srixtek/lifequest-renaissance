@@ -57,3 +57,15 @@ export const QUESTS: QuestDef[] = [
 ];
 
 export const QUEST_BY_ID: Record<string, QuestDef> = Object.fromEntries(QUESTS.map((q) => [q.id, q]));
+
+/** Étapes concrètes affichées sur la carte quand la quête est disponible ou en cours. */
+export const QUEST_HOW_TO: Record<string, string> = {
+  first_confirm:
+    'Accepter la quête, puis ouvre Habitudes et déclare une habitude (réussite, partiel ou écart).',
+  breathe_once:
+    'Accepter la quête, puis Camp → Respiration (ou outil Respiration) et termine la séance jusqu\'au bout.',
+  time_tamed:
+    'Accepter la quête, puis lance un défi chronométré (sport ou sans écran) depuis les outils du camp.',
+  explore_grove:
+    'Accepter la quête, puis Royaume → Ancien sentier : progresse jusqu\'à la Clairière voilée.',
+};
