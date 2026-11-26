@@ -155,14 +155,38 @@ export async function completeVapeChallenge(db: Db, sessionId: string): Promise<
   return closeChallengeSession(db, sessionId, 'completed', { requireSportConfirm: false });
 }
 
+export async function completeScreenChallengeOnConn(
+  conn: Conn,
+  sessionId: string,
+  respected: boolean,
+): Promise<CloseChallengeResult> {
+  return closeChallengeSessionOnConn(conn, sessionId, respected ? 'completed' : 'interrupted', {
+    requireSportConfirm: false,
+  });
+}
+
+export async function completeSportChallengeOnConn(
+  conn: Conn,
+  sessionId: string,
+  confirmedMinutes: number,
+): Promise<CloseChallengeResult> {
+  const sec = Math.max(0, Math.floor(confirmedMinutes * 60));
+  return closeChallengeSessionOnConn(conn, sessionId, 'completed', {
+    userConfirmedDurationSec: sec,
+    requireSportConfirm: true,
+  });
+}
+
 export async function completeScreenChallenge(
   db: Db,
   sessionId: string,
   respected: boolean,
 ): Promise<CloseChallengeResult> {
-  return closeChallengeSession(db, sessionId, respected ? 'completed' : 'interrupted', {
-    requireSportConfirm: false,
+  let result: CloseChallengeResult = { ok: false, code: 'not_found' };
+  await db.withExclusiveTransactionAsync(async (tx) => {
+    result = await completeScreenChallengeOnConn(tx, sessionId, respected);
   });
+  return result;
 }
 
 export async function completeSportChallenge(
@@ -170,11 +194,11 @@ export async function completeSportChallenge(
   sessionId: string,
   confirmedMinutes: number,
 ): Promise<CloseChallengeResult> {
-  const sec = Math.max(0, Math.floor(confirmedMinutes * 60));
-  return closeChallengeSession(db, sessionId, 'completed', {
-    userConfirmedDurationSec: sec,
-    requireSportConfirm: true,
+  let result: CloseChallengeResult = { ok: false, code: 'not_found' };
+  await db.withExclusiveTransactionAsync(async (tx) => {
+    result = await completeSportChallengeOnConn(tx, sessionId, confirmedMinutes);
   });
+  return result;
 }
 
 export async function getActiveChallenge(db: Conn, type: ChallengeType): Promise<ChallengeSession | null> {

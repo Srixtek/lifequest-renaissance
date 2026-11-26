@@ -7,6 +7,8 @@ import { colors, spacing, typography } from './theme';
 import type { RenewableBoardEntry } from '@/src/domain/services/renewableQuestService';
 import { categoryLabel } from '@/src/domain/services/renewableQuestService';
 import type { RenewableQuestCategory } from '@/src/data/content/renewableQuestTemplates';
+import { displayElapsedSec } from '@/src/domain/services/challengeService';
+import { formatChallengeHms, progressTowardTarget } from '@/src/domain/rules/challengeDuration';
 
 const BADGE: Record<string, { label: string; color: string }> = {
   offered: { label: 'Disponible', color: colors.muted },
@@ -27,6 +29,7 @@ export function RenewableQuestCard({
   onSucceedTimer,
   onPartialStop,
   winFlash,
+  highlighted,
 }: {
   entry: RenewableBoardEntry;
   busy: boolean;
@@ -39,6 +42,7 @@ export function RenewableQuestCard({
   onSucceedTimer?: () => void;
   onPartialStop?: () => void;
   winFlash?: boolean;
+  highlighted?: boolean;
 }) {
   const { template, state, progress } = entry;
   const badge = BADGE[state] ?? BADGE.offered;
@@ -48,14 +52,48 @@ export function RenewableQuestCard({
 
   useEffect(() => {
     if (!entry.timerRunning) return;
-    const id = setInterval(() => setTick((t) => t + 1), 1000);
+    const id = setInterval(() => setTick((n) => n + 1), 1000);
     return () => clearInterval(id);
-  }, [entry.timerRunning, tick]);
+  }, [entry.timerRunning]);
+
+  const liveElapsed =
+    entry.timerRunning && entry.inlineTimer
+      ? displayElapsedSec(
+          {
+            id: '',
+            type: 'sport',
+            startedUtc: entry.inlineTimer.startedUtc,
+            endedUtc: null,
+            targetDurationSec: entry.inlineTimer.targetSec,
+            state: 'running',
+            durationSec: 0,
+            userConfirmed: false,
+            userConfirmedDurationSec: null,
+            createdAt: entry.inlineTimer.startedUtc,
+            updatedAt: entry.inlineTimer.startedUtc,
+          },
+          Date.now(),
+        )
+      : null;
+  const liveProgress =
+    liveElapsed != null && entry.inlineTimer
+      ? progressTowardTarget(liveElapsed, entry.inlineTimer.targetSec)
+      : null;
+  const progressLabel =
+    liveElapsed != null && entry.inlineTimer
+      ? `${formatChallengeHms(liveElapsed)} / ${formatChallengeHms(entry.inlineTimer.targetSec)}`
+      : progress.label;
+  const progressValue =
+    liveProgress != null
+      ? liveProgress
+      : progress.target > 1
+        ? progress.current / progress.target
+        : progress.current;
 
   const cat = categoryLabel(template.category as RenewableQuestCategory);
 
   return (
-    <FantasyPanel accent={state === 'ready' || winFlash}>
+    <FantasyPanel accent={state === 'ready' || winFlash || highlighted}>
       <View style={styles.header}>
         <View style={styles.headerMain}>
           <Text style={styles.category}>{cat} · {template.difficulty} · {template.durationLabel}</Text>
@@ -75,11 +113,12 @@ export function RenewableQuestCard({
       </Text>
       {state !== 'offered' ? (
         <View style={styles.progressBlock}>
-          <ProgressBar
-            progress={progress.target > 1 ? progress.current / progress.target : progress.current}
-            label={progress.label}
-            height={8}
-          />
+          <ProgressBar progress={progressValue} label={progressLabel} height={8} />
+          {liveElapsed != null && entry.inlineTimer ? (
+            <Text style={styles.liveClock}>
+              Chrono {formatChallengeHms(liveElapsed)} — cible {formatChallengeHms(entry.inlineTimer.targetSec)}
+            </Text>
+          ) : null}
           <Text style={styles.reward}>+{template.rewardGold} or</Text>
         </View>
       ) : (
@@ -132,6 +171,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   progressBlock: { marginTop: spacing.sm, gap: 4 },
+  liveClock: { ...typography.caption, color: colors.ember, fontWeight: '600', textAlign: 'center' },
   reward: { ...typography.caption, color: colors.gold, fontWeight: '700', textAlign: 'right' },
   rewardIdle: { ...typography.caption, color: colors.gold, fontWeight: '700', marginTop: spacing.sm },
   timerRow: { gap: spacing.xs, marginTop: spacing.sm },

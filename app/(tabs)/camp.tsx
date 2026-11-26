@@ -106,7 +106,13 @@ export default function CampScreen() {
     if (!whatToDo) return;
     const r = whatToDo.route;
     if (r.kind === 'adventure') {
-      router.push('/(tabs)/adventure');
+      const q = new URLSearchParams();
+      if (r.tab) q.set('tab', r.tab);
+      if (r.instanceId) q.set('instanceId', r.instanceId);
+      if (r.tab === 'royaume' && whatToDo.kind === 'combat') q.set('openCombat', '1');
+      if (r.tab === 'royaume' && whatToDo.kind === 'forge') q.set('openForge', '1');
+      const qs = q.toString();
+      router.push(qs ? `/(tabs)/adventure?${qs}` : '/(tabs)/adventure');
     } else if (r.kind === 'vape-adaptive') {
       router.push('/tools/vape-adaptive');
     } else if (r.kind === 'challenges') {
