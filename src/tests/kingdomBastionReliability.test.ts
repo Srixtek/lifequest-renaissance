@@ -14,7 +14,7 @@ import {
   startCombat,
 } from '../domain/services/kingdomService';
 import { exportBackupPayload, importBackupPayload } from '../domain/services/backupService';
-import { FIRST_WIN_ITEM_ID, FORGE_UPGRADE_COST, HERO_BASE_DAMAGE } from '../data/content/kingdom';
+import { FIRST_WIN_ITEM_ID, HERO_BASE_DAMAGE } from '../data/content/kingdom';
 import type { ClassId } from '../domain/models/types';
 import { nodeSqliteAvailable, openNodeSqliteDb, type TestDb } from './helpers/nodeSqliteDb';
 
