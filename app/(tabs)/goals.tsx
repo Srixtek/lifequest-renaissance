@@ -22,7 +22,6 @@ import { HabitSetupFlow } from '@/src/design-system/HabitSetupFlow';
 import { scheduleVersionUpdate } from '@/src/domain/services/goalLifecycleService';
 import {
   countWeeklySuccessDays,
-  formatWeeklyProgress,
   weekBoundsMondaySunday,
 } from '@/src/domain/rules/weeklyTracking';
 import type { GoalDefinition, GoalKind, TrackingStatus } from '@/src/domain/models/types';
@@ -35,7 +34,10 @@ import {
 import { HELP_LINES, HEALTH_GUARDRAIL } from '@/src/data/content/helpLines';
 import { useRouter } from 'expo-router';
 import { challengeTypeForTemplate } from '@/src/domain/models/challengeSession';
-import { publicGoalTitle } from '@/src/domain/content/goalDisplay';
+import {
+  customCreationTargetPlaceholder,
+  presentHabitCard,
+} from '@/src/domain/content/habitPresentation';
 
 const STATUS_FR: Record<TrackingStatus, string> = {
   unknown: 'Non renseigné',
@@ -317,7 +319,7 @@ export default function GoalsScreen() {
         const { effectiveFrom } = await scheduleVersionUpdate(db, goalId, today, {
           weeklyTargetCount: w,
         });
-        showFeedback(`Cible hebdo mise à jour — effet à partir du ${effectiveFrom}.`);
+        showFeedback(`Objectif hebdo mis à jour — effet à partir du ${effectiveFrom}.`);
       } else {
         const check = validateCreationTarget(kind, raw);
         if (!check.ok) {
@@ -325,13 +327,13 @@ export default function GoalsScreen() {
           return;
         }
         if (check.value == null) {
-          showFeedback('Une cible numérique est requise.');
+          showFeedback('Un repère numérique est requis.');
           return;
         }
         const { effectiveFrom } = await scheduleVersionUpdate(db, goalId, today, {
           targetValue: check.value,
         });
-        showFeedback(`Cible mise à jour — effet à partir du ${effectiveFrom} (historique inchangé).`);
+        showFeedback(`Objectif mis à jour — effet à partir du ${effectiveFrom} (historique inchangé).`);
       }
       await refresh();
     });
@@ -387,23 +389,22 @@ export default function GoalsScreen() {
           const statusLabel = displayStatus(g, rawStatus, tr?.value != null);
           const ver = versions[g.id];
           const numeric = usesNumericLog(g.kind);
-          const savedValue =
-            tr?.value != null
-              ? `${tr.value}${g.unit ? ` ${g.unit}` : ''}`
-              : '—';
           const tpl = GOAL_TEMPLATES.find((t) => t.id === g.templateId);
           const initialDraft =
             draftValues[g.id] ?? (tr?.value != null ? String(tr.value) : '');
-          const targetLabel =
-            ver?.scheduleKind === 'weekly' && ver.weeklyTarget != null
-              ? formatWeeklyProgress(weeklyDone[g.id] ?? 0, ver.weeklyTarget)
-              : ver?.target != null
-                ? `Cible : ${ver.target}${g.unit ? ` ${g.unit}` : ''}`
-                : g.kind === 'abstinence'
-                  ? 'Abstinence déclarée'
-                  : g.followWithoutXp
-                    ? 'Suivi neutre'
-                    : 'Confirmation quotidienne';
+          const presentation = presentHabitCard(
+            g,
+            ver
+              ? {
+                  unit: g.unit,
+                  target: ver.target,
+                  scheduleKind: ver.scheduleKind,
+                  weeklyTarget: ver.weeklyTarget,
+                }
+              : undefined,
+            tr ? { status: rawStatus, value: tr.value } : undefined,
+            weeklyDone[g.id] ?? 0,
+          );
           const progress =
             !g.followWithoutXp &&
             ver?.target != null &&
@@ -412,7 +413,7 @@ export default function GoalsScreen() {
               ? completionRatio(status, g.kind, tr.value, ver.target)
               : undefined;
           const challengeType = challengeTypeForTemplate(g.templateId);
-          const displayTitle = publicGoalTitle(g);
+          const displayTitle = presentation.title;
 
           const showTrackControls = mode === 'track';
           const showChallengeCtas = mode === 'challenges';
@@ -424,8 +425,8 @@ export default function GoalsScreen() {
               category={tpl?.category}
               status={status}
               statusLabel={statusLabel}
-              targetLabel={targetLabel}
-              valueLabel={savedValue}
+              targetLabel={presentation.objectiveLine}
+              valueLabel={presentation.todayValueLabel}
               progress={progress}
             >
               {showChallengeCtas && g.templateId === 'vape_sessions' ? (
@@ -445,6 +446,12 @@ export default function GoalsScreen() {
 
               {!showTrackControls ? null : (
                 <>
+              <Text style={styles.questionLine}>{presentation.dailyQuestion}</Text>
+              {presentation.breathingManualNote ? (
+                <View style={styles.note}>
+                  <Body muted>{presentation.breathingManualNote}</Body>
+                </View>
+              ) : null}
               {tpl?.neutralNote ? (
                 <View style={styles.note}>
                   <Body>{tpl.neutralNote}</Body>
@@ -471,12 +478,12 @@ export default function GoalsScreen() {
                   <Field
                     value={initialDraft}
                     onChangeText={(t) => setDraftValues((d) => ({ ...d, [g.id]: t }))}
-                    placeholder={g.unit ? `Quantité (${g.unit})` : 'Valeur'}
+                    placeholder={presentation.inputPlaceholder}
                     keyboardType="decimal-pad"
-                    accessibilityLabel={`Saisie ${displayTitle}`}
+                    accessibilityLabel={presentation.inputAccessibilityLabel}
                   />
                   <Button
-                    label="Enregistrer la valeur"
+                    label={presentation.primaryLogLabel}
                     onPress={() => saveNumeric(g)}
                     variant="primary"
                     disabled={actionBusy}
@@ -484,50 +491,34 @@ export default function GoalsScreen() {
                 </>
               ) : null}
 
-              {ver?.scheduleKind === 'weekly' ? (
-                <Body muted>Suivi hebdomadaire — pas encore de récompense RPG sur cette habitude.</Body>
-              ) : null}
+              {presentation.weeklyHint ? <Body muted>{presentation.weeklyHint}</Body> : null}
 
               {g.status !== 'paused' && (binaryHabit(g) || binaryAbstinence(g) || binaryWeeklyHabit(g)) ? (
                 <>
-                  <Body muted>Confirmation du jour (réversible) :</Body>
+                  {presentation.binaryPrompt ? (
+                    <Body muted>{presentation.binaryPrompt}</Body>
+                  ) : null}
                   <View style={styles.row}>
-                    {binaryAbstinence(g) ? (
+                    {binaryAbstinence(g) || binaryWeeklyHabit(g) || binaryHabit(g) ? (
                       <>
                         <Chip
-                          label="Journée sans consommation"
+                          label={presentation.binarySuccessLabel}
                           selected={status === 'success'}
-                          onPress={() => confirm(g.id, 'success', 0)}
+                          onPress={() => {
+                            if (binaryAbstinence(g)) void confirm(g.id, 'success', 0);
+                            else void confirm(g.id, 'success');
+                          }}
                         />
                         <Chip
-                          label="Consommation déclarée"
+                          label={presentation.binaryMissLabel}
                           selected={status === 'miss'}
-                          onPress={() => confirm(g.id, 'miss', 1)}
+                          onPress={() => {
+                            if (binaryAbstinence(g)) void confirm(g.id, 'miss', 1);
+                            else void confirm(g.id, 'miss');
+                          }}
                         />
                       </>
-                    ) : binaryWeeklyHabit(g) ? (
-                      <>
-                        <Chip
-                          label="Appel fait"
-                          selected={status === 'success'}
-                          onPress={() => confirm(g.id, 'success')}
-                        />
-                        <Chip
-                          label="Pas d'appel"
-                          selected={status === 'miss'}
-                          onPress={() => confirm(g.id, 'miss')}
-                        />
-                      </>
-                    ) : (
-                      <>
-                        <Chip
-                          label="Fait"
-                          selected={status === 'success'}
-                          onPress={() => confirm(g.id, 'success')}
-                        />
-                        <Chip label="Pas fait" selected={status === 'miss'} onPress={() => confirm(g.id, 'miss')} />
-                      </>
-                    )}
+                    ) : null}
                     <Chip
                       label="Non renseigné"
                       selected={status === 'unknown'}
@@ -541,21 +532,23 @@ export default function GoalsScreen() {
                 <>
                   {(kindRequiresNumericTarget(g.kind) || ver?.scheduleKind === 'weekly') && g.status !== 'paused' ? (
                     <View style={styles.note}>
-                      <Body>Modifier mon objectif (effet dès demain)</Body>
+                      <Body>{presentation.editTargetTitle}</Body>
                       <Field
                         value={editTargetDraft[g.id] ?? (ver?.weeklyTarget != null ? String(ver.weeklyTarget) : ver?.target != null ? String(ver.target) : '')}
                         onChangeText={(t) => setEditTargetDraft((d) => ({ ...d, [g.id]: t }))}
                         keyboardType="decimal-pad"
-                        placeholder={ver?.scheduleKind === 'weekly' ? 'Jours / semaine' : 'Nouvelle cible'}
+                        placeholder={presentation.editTargetPlaceholder}
                       />
                       <Button
-                        label="Enregistrer la cible"
+                        label={presentation.editTargetSaveLabel}
                         variant="secondary"
                         disabled={actionBusy}
                         onPress={() => void applyTargetEdit(g.id, g.kind)}
                       />
                     </View>
                   ) : null}
+                  <Body muted>{presentation.pauseHint}</Body>
+                  <Body muted>{presentation.archiveHint}</Body>
                   <View style={styles.manageRow}>
                     <Chip
                       label={g.status === 'paused' ? 'Reprendre' : 'Pause'}
@@ -582,7 +575,9 @@ export default function GoalsScreen() {
                 </>
               ) : null}
               <Button
-                label={detailsOpen[g.id] ? 'Masquer détails' : 'Détails & réglages'}
+                label={
+                  detailsOpen[g.id] ? presentation.settingsToggleOpen : presentation.settingsToggleClosed
+                }
                 variant="ghost"
                 onPress={() => toggleDetails(g.id)}
                 disabled={actionBusy}
@@ -618,7 +613,7 @@ export default function GoalsScreen() {
                 <Field
                   value={customTarget}
                   onChangeText={setCustomTarget}
-                  placeholder="Cible numérique (obligatoire)"
+                  placeholder={customCreationTargetPlaceholder(customKind)}
                   keyboardType="decimal-pad"
                 />
               ) : (
@@ -661,6 +656,12 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', flexWrap: 'wrap', marginTop: spacing.sm },
   manageRow: { flexDirection: 'row', flexWrap: 'wrap', marginTop: spacing.md, opacity: 0.9 },
   flash: { color: colors.ember, marginTop: spacing.sm },
+  questionLine: {
+    ...typography.body,
+    color: colors.ink,
+    marginTop: spacing.sm,
+    marginBottom: spacing.xs,
+  },
   note: {
     marginTop: spacing.sm,
     padding: spacing.sm,

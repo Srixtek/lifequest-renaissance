@@ -24,6 +24,7 @@ import {
 import { validateCreationTarget } from '@/src/domain/rules/trackingStatus';
 import type { GoalTier } from '@/src/domain/models/types';
 import { friendlyDbError } from '@/src/utils/dbErrors';
+import { setupTargetCopy } from '@/src/domain/content/habitPresentation';
 
 const CATEGORIES: HabitCategory[] = ['A', 'B', 'C', 'D', 'E', 'F'];
 
@@ -174,16 +175,40 @@ export function HabitSetupFlow({
 
       {step === 'target' && category && intention ? (
         <View>
-          <Body>
-            {INTENTION_OPTIONS[category].find((o) => o.id === intention)?.hint ?? 'Confirme ta cible.'}
-          </Body>
+          {(() => {
+            const opt = INTENTION_OPTIONS[category].find((o) => o.id === intention);
+            const targetCopy = setupTargetCopy(category, intention);
+            if (targetCopy) {
+              return <Body>{targetCopy.prompt}</Body>;
+            }
+            if (intention === 'stop') {
+              return (
+                <Body>
+                  Tu vises une journée sans consommation déclarée — confirme pour activer cet objectif.
+                </Body>
+              );
+            }
+            if (intention === 'measure') {
+              return (
+                <Body>
+                  Suivi neutre : tu notes les valeurs sans plafond imposé et sans récompense XP automatique.
+                </Body>
+              );
+            }
+            if (intention === 'weekly_calls') {
+              return <Body>{opt?.hint ?? 'Choisis combien de jours par semaine tu vises.'}</Body>;
+            }
+            return <Body>{opt?.hint ?? 'Confirme ton choix.'}</Body>;
+          })()}
           {intentionRequiresNumericTarget(category, intention) ? (
             <Field
               value={targetDraft}
               onChangeText={setTargetDraft}
               keyboardType="decimal-pad"
-              placeholder="Cible"
-              accessibilityLabel="Cible numérique"
+              placeholder={setupTargetCopy(category, intention)?.placeholder ?? 'Repère quotidien'}
+              accessibilityLabel={
+                setupTargetCopy(category, intention)?.accessibilityLabel ?? 'Repère numérique'
+              }
             />
           ) : null}
           {intentionRequiresWeeklyCount(intention) ? (
@@ -196,10 +221,15 @@ export function HabitSetupFlow({
             />
           ) : null}
           {intention === 'measure' ? (
-            <Body muted>Suivi neutre : aucune récompense XP automatique.</Body>
+            <Body muted>Aucun plafond ni minimum : tu déclares honnêtement chaque jour.</Body>
           ) : null}
           {intention === 'weekly_calls' ? (
-            <Body muted>Suivi hebdomadaire — pas encore de récompense RPG sur cette habitude.</Body>
+            <Body muted>
+              Chaque jour, tu confirmes si tu as appelé — les jours sans réponse ne comptent pas comme échec.
+            </Body>
+          ) : null}
+          {category === 'C' && intention !== 'measure' ? (
+            <Body muted>Objectif sensible : titre discret dans la liste publique.</Body>
           ) : null}
           <View style={styles.chips}>
             <Button
