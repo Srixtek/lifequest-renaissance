@@ -7,6 +7,9 @@ export const VAPE_TIER_COUNT = VAPE_DELAY_TIER_MINUTES.length;
 
 export const VAPE_TIER_GOLD_REWARD = 3;
 
+/** Paliers record (minutes) — or idempotent par palier atteint. */
+export const VAPE_RECORD_MILESTONE_MINUTES = [15, 30, 60, 120, 240] as const;
+
 export interface VapeChallengeDef {
   format: VapeChallengeFormat;
   title: string;
@@ -71,4 +74,14 @@ export function vapeChallengeDef(format: VapeChallengeFormat): VapeChallengeDef 
   const d = VAPE_CHALLENGE_DEFS.find((x) => x.format === format);
   if (!d) throw new Error('Défi vape inconnu');
   return d;
+}
+
+export function highestRecordMilestoneMinutes(durationSec: number): number | null {
+  if (durationSec < 1) return null;
+  const mins = durationSec / 60;
+  let best: number | null = null;
+  for (const m of VAPE_RECORD_MILESTONE_MINUTES) {
+    if (mins >= m) best = m;
+  }
+  return best;
 }

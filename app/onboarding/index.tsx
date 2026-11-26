@@ -8,10 +8,26 @@ import { ClassSymbol } from '@/src/design-system/icons';
 import { CLASSES } from '@/src/data/content/classes';
 import { GOAL_TEMPLATES } from '@/src/data/content/goalTemplates';
 import { HELP_LINES, HEALTH_GUARDRAIL } from '@/src/data/content/helpLines';
+import {
+  CONFIG_CATEGORY_LABELS,
+  INTENTION_OPTIONS,
+  intentionRequiresNumericTarget,
+  resolveHabitPlan,
+  type HabitIntentionChoice,
+} from '@/src/domain/content/habitIntentions';
 import type { ClassId } from '@/src/domain/models/types';
 import { getDb } from '@/src/data/db/client';
 import { completeOnboarding } from '@/src/domain/services/onboardingService';
 import { useAppStore } from '@/src/state/appStore';
+
+const FREQ_REGULATION_ID = 'freq_regulation';
+
+function onboardingLabelForTemplate(t: (typeof GOAL_TEMPLATES)[0]): string {
+  if (t.id === FREQ_REGULATION_ID) {
+    return `${CONFIG_CATEGORY_LABELS.C} (facultatif)`;
+  }
+  return t.title;
+}
 
 export default function OnboardingScreen() {
   const insets = useSafeAreaInsets();
@@ -21,10 +37,25 @@ export default function OnboardingScreen() {
   const [classId, setClassId] = useState<ClassId>('rodeur');
   const [tone, setTone] = useState<'fantasy' | 'sobre'>('fantasy');
   const [selected, setSelected] = useState<string[]>([]);
+  const [sensitiveIntention, setSensitiveIntention] = useState<HabitIntentionChoice | null>(null);
+  const [sensitiveTarget, setSensitiveTarget] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const sensitiveSelected = selected.includes(FREQ_REGULATION_ID);
+
   const toggle = (id: string) => {
+    if (id === FREQ_REGULATION_ID) {
+      setSelected((prev) => {
+        if (prev.includes(id)) {
+          setSensitiveIntention(null);
+          setSensitiveTarget('');
+          return prev.filter((x) => x !== id);
+        }
+        return [...prev, id];
+      });
+      return;
+    }
     setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   };
 
@@ -35,8 +66,39 @@ export default function OnboardingScreen() {
     setBusy(true);
     setError(null);
     try {
+      if (sensitiveSelected && !sensitiveIntention) {
+        setError('Choisis une intention pour la rubrique sensible, ou décoche-la.');
+        return;
+      }
+      let templateIds = [...selected];
+      let sensitiveRegulation = null as { intention: HabitIntentionChoice; targetValue: number | null } | null;
+      if (sensitiveSelected && sensitiveIntention) {
+        if (sensitiveIntention === 'measure') {
+          sensitiveRegulation = { intention: 'measure', targetValue: null };
+        } else if (intentionRequiresNumericTarget('C', sensitiveIntention)) {
+          const raw = sensitiveTarget.trim();
+          const plan = resolveHabitPlan('C', sensitiveIntention, null, null);
+          const n = raw ? Number(raw.replace(',', '.')) : (plan.defaultTarget ?? NaN);
+          if (!Number.isFinite(n) || n <= 0) {
+            setError('Indique une cible quotidienne positive, ou choisis « Mesurer ».');
+            return;
+          }
+          sensitiveRegulation = { intention: sensitiveIntention, targetValue: n };
+        } else {
+          sensitiveRegulation = { intention: sensitiveIntention, targetValue: null };
+        }
+      } else if (sensitiveSelected) {
+        templateIds = templateIds.filter((x) => x !== FREQ_REGULATION_ID);
+      }
+
       const db = await getDb();
-      await completeOnboarding(db, { pseudo, classId, tone, templateIds: selected });
+      await completeOnboarding(db, {
+        pseudo,
+        classId,
+        tone,
+        templateIds,
+        sensitiveRegulation,
+      });
       await refresh();
       router.replace('/(tabs)/camp');
     } catch (e: any) {
@@ -91,17 +153,59 @@ export default function OnboardingScreen() {
 
         <View style={{ height: spacing.lg }} />
         <Title>Premiers objectifs</Title>
-        <Body muted>Tu pourras en ajouter ensuite. Rien n'est coché comme réussi par défaut.</Body>
+        <Body muted>Rien n'est coché par défaut. La rubrique sensible est toujours facultative.</Body>
         <View style={[styles.row, { marginTop: spacing.sm }]}>
-          {GOAL_TEMPLATES.map((t) => (
+          {GOAL_TEMPLATES.filter((t) => t.id !== 'breathing5').map((t) => (
             <Chip
               key={t.id}
-              label={t.sensitive ? 'Régulation personnelle' : t.title}
+              label={onboardingLabelForTemplate(t)}
               selected={selected.includes(t.id)}
               onPress={() => toggle(t.id)}
             />
           ))}
         </View>
+
+        {sensitiveSelected ? (
+          <View style={styles.note}>
+            <Body>{CONFIG_CATEGORY_LABELS.C} — que veux-tu faire ?</Body>
+            <View style={styles.row}>
+              {INTENTION_OPTIONS.C.map((opt) => (
+                <Chip
+                  key={opt.id}
+                  label={opt.label}
+                  selected={sensitiveIntention === opt.id}
+                  onPress={() => {
+                    setSensitiveIntention(opt.id);
+                    const plan = resolveHabitPlan('C', opt.id, null, null);
+                    if (plan.defaultTarget != null) setSensitiveTarget(String(plan.defaultTarget));
+                    else setSensitiveTarget('');
+                  }}
+                />
+              ))}
+              <Chip
+                label="Ne pas suivre"
+                selected={false}
+                onPress={() => {
+                  setSensitiveIntention(null);
+                  setSensitiveTarget('');
+                  setSelected((prev) => prev.filter((x) => x !== FREQ_REGULATION_ID));
+                }}
+              />
+            </View>
+            {sensitiveIntention && intentionRequiresNumericTarget('C', sensitiveIntention) ? (
+              <Field
+                value={sensitiveTarget}
+                onChangeText={setSensitiveTarget}
+                keyboardType="decimal-pad"
+                placeholder="Cible quotidienne (fois)"
+                accessibilityLabel="Cible sensible"
+              />
+            ) : null}
+            {sensitiveIntention === 'measure' ? (
+              <Body muted>Suivi neutre — pas de limite implicite ni de récompense XP automatique.</Body>
+            ) : null}
+          </View>
+        ) : null}
 
         {showNicotine ? (
           <View style={styles.note}>

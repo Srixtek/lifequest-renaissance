@@ -5,14 +5,28 @@ import * as rpgRepo from '../../data/db/repositories/rpgRepo';
 import type { ClassId, GoalTier, Profile } from '../models/types';
 import { GOAL_TEMPLATES } from '../../data/content/goalTemplates';
 import { STARTER_ITEM_ID } from '../../data/content/items';
+import {
+  intentionRequiresNumericTarget,
+  resolveHabitPlan,
+  type HabitIntentionChoice,
+} from '../content/habitIntentions';
+import { createHabitGoal } from './goalLifecycleService';
+import { validateCreationTarget } from '../rules/trackingStatus';
 import { nowIso } from '../rules/dates';
 import { createId } from '../../utils/id';
+
+export interface SensitiveOnboardingChoice {
+  intention: HabitIntentionChoice;
+  targetValue: number | null;
+}
 
 export interface OnboardingInput {
   pseudo: string;
   classId: ClassId;
   tone: 'fantasy' | 'sobre';
   templateIds: string[];
+  /** Réglage explicite pour freq_regulation — pas de limite implicite. */
+  sensitiveRegulation?: SensitiveOnboardingChoice | null;
   dayStartHour?: number;
 }
 
@@ -38,6 +52,19 @@ export async function completeOnboarding(db: Db, input: OnboardingInput): Promis
     for (const tid of input.templateIds) {
       const t = GOAL_TEMPLATES.find((x) => x.id === tid);
       if (!t) continue;
+      if (t.id === 'freq_regulation') {
+        const choice = input.sensitiveRegulation;
+        if (!choice) continue;
+        const plan = resolveHabitPlan('C', choice.intention, choice.targetValue, null);
+        let target: number | null = plan.defaultTarget;
+        if (choice.intention === 'measure') target = null;
+        else if (intentionRequiresNumericTarget('C', choice.intention) && choice.targetValue != null) {
+          const check = validateCreationTarget(plan.kind, String(choice.targetValue));
+          if (check.ok) target = check.value;
+        }
+        await createHabitGoal(db, plan, target, t.defaultTier as GoalTier);
+        continue;
+      }
       const goalId = createId('goal');
       const createdAt = nowIso();
       await goalRepo.insertGoal(

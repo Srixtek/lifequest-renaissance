@@ -4,10 +4,16 @@ export type VapeChallengeFormat = 'delay_craving' | 'breathing' | 'interval' | '
 
 export type AdaptiveAttemptOutcome = 'running' | 'success' | 'failure' | 'unknown';
 
+export type VapeTierTrack = 'delay' | 'interval';
+
 export interface AdaptiveChallengeState {
   habitCategory: AdaptiveHabitCategory;
+  /** Palier « Retarder une envie » */
   tierIndex: number;
   tierManual: boolean;
+  /** Palier « Intervalle sans vapoter » */
+  tierIndexInterval: number;
+  tierManualInterval: boolean;
   updatedAt: string;
 }
 
@@ -18,6 +24,7 @@ export interface AdaptiveChallengeAttempt {
   tierIndex: number;
   outcome: AdaptiveAttemptOutcome;
   challengeSessionId: string | null;
+  copingSessionId: string | null;
   targetDurationSec: number | null;
   declaredDurationSec: number | null;
   startedAt: string;

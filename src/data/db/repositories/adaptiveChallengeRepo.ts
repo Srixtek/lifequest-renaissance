@@ -16,6 +16,8 @@ function mapState(r: Record<string, unknown>): AdaptiveChallengeState {
     habitCategory: r.habit_category as AdaptiveHabitCategory,
     tierIndex: Number(r.tier_index),
     tierManual: !!r.tier_manual,
+    tierIndexInterval: r.tier_index_interval != null ? Number(r.tier_index_interval) : 0,
+    tierManualInterval: r.tier_manual_interval != null ? !!r.tier_manual_interval : false,
     updatedAt: String(r.updated_at),
   };
 }
@@ -28,6 +30,7 @@ function mapAttempt(r: Record<string, unknown>): AdaptiveChallengeAttempt {
     tierIndex: Number(r.tier_index),
     outcome: r.outcome as AdaptiveAttemptOutcome,
     challengeSessionId: r.challenge_session_id != null ? String(r.challenge_session_id) : null,
+    copingSessionId: r.coping_session_id != null ? String(r.coping_session_id) : null,
     targetDurationSec: r.target_duration_sec != null ? Number(r.target_duration_sec) : null,
     declaredDurationSec: r.declared_duration_sec != null ? Number(r.declared_duration_sec) : null,
     startedAt: String(r.started_at),
@@ -55,12 +58,19 @@ export async function getOrInitState(db: Conn, category: AdaptiveHabitCategory):
   if (row) return mapState(row);
   const now = new Date().toISOString();
   await db.runAsync(
-    `INSERT INTO adaptive_challenge_state (habit_category, tier_index, tier_manual, updated_at)
-     VALUES (?, 0, 0, ?)`,
+    `INSERT INTO adaptive_challenge_state (habit_category, tier_index, tier_manual, tier_index_interval, tier_manual_interval, updated_at)
+     VALUES (?, 0, 0, 0, 0, ?)`,
     category,
     now,
   );
-  return { habitCategory: category, tierIndex: 0, tierManual: false, updatedAt: now };
+  return {
+    habitCategory: category,
+    tierIndex: 0,
+    tierManual: false,
+    tierIndexInterval: 0,
+    tierManualInterval: false,
+    updatedAt: now,
+  };
 }
 
 export async function updateStateTier(
@@ -77,6 +87,43 @@ export async function updateStateTier(
     updatedAt,
     category,
   );
+}
+
+export async function updateStateIntervalTier(
+  db: Conn,
+  category: AdaptiveHabitCategory,
+  tierIndex: number,
+  tierManual: boolean,
+  updatedAt: string,
+): Promise<void> {
+  await db.runAsync(
+    `UPDATE adaptive_challenge_state SET tier_index_interval = ?, tier_manual_interval = ?, updated_at = ? WHERE habit_category = ?`,
+    tierIndex,
+    tierManual ? 1 : 0,
+    updatedAt,
+    category,
+  );
+}
+
+export async function resumeAutoTier(
+  db: Conn,
+  category: AdaptiveHabitCategory,
+  track: 'delay' | 'interval',
+  updatedAt: string,
+): Promise<void> {
+  if (track === 'delay') {
+    await db.runAsync(
+      `UPDATE adaptive_challenge_state SET tier_manual = 0, updated_at = ? WHERE habit_category = ?`,
+      updatedAt,
+      category,
+    );
+  } else {
+    await db.runAsync(
+      `UPDATE adaptive_challenge_state SET tier_manual_interval = 0, updated_at = ? WHERE habit_category = ?`,
+      updatedAt,
+      category,
+    );
+  }
 }
 
 export async function getRunningAttempt(
@@ -101,15 +148,16 @@ export async function getAttemptById(db: Conn, id: string): Promise<AdaptiveChal
 export async function insertAttempt(db: Conn, attempt: AdaptiveChallengeAttempt): Promise<void> {
   await db.runAsync(
     `INSERT INTO adaptive_challenge_attempts
-     (id, habit_category, format, tier_index, outcome, challenge_session_id, target_duration_sec,
+     (id, habit_category, format, tier_index, outcome, challenge_session_id, coping_session_id, target_duration_sec,
       declared_duration_sec, started_at, ended_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     attempt.id,
     attempt.habitCategory,
     attempt.format,
     attempt.tierIndex,
     attempt.outcome,
     attempt.challengeSessionId,
+    attempt.copingSessionId,
     attempt.targetDurationSec,
     attempt.declaredDurationSec,
     attempt.startedAt,
@@ -170,6 +218,28 @@ export async function listInformedOutcomes(db: Conn, category: AdaptiveHabitCate
     limit,
   );
   return rows.map((r) => r.outcome as 'success' | 'failure' | 'unknown');
+}
+
+export async function listInformedOutcomesForFormat(
+  db: Conn,
+  category: AdaptiveHabitCategory,
+  format: VapeChallengeFormat,
+  limit = 12,
+): Promise<Array<'success' | 'failure' | 'unknown'>> {
+  const rows = await db.getAllAsync<{ outcome: string }>(
+    `SELECT outcome FROM adaptive_challenge_attempts
+     WHERE habit_category = ? AND format = ? AND outcome IN ('success', 'failure', 'unknown')
+     ORDER BY COALESCE(ended_at, updated_at) DESC
+     LIMIT ?`,
+    category,
+    format,
+    limit,
+  );
+  return rows.map((r) => r.outcome as 'success' | 'failure' | 'unknown');
+}
+
+export async function setAttemptCopingSessionId(db: Conn, attemptId: string, copingSessionId: string): Promise<void> {
+  await db.runAsync(`UPDATE adaptive_challenge_attempts SET coping_session_id = ? WHERE id = ?`, copingSessionId, attemptId);
 }
 
 export async function getRecord(

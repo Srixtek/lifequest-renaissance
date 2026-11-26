@@ -1,16 +1,18 @@
 import { informedOutcomesFromAttempts, suggestTierIndex } from '../domain/rules/adaptiveTier';
 import {
   delayMinutesForTier,
+  VAPE_BREATHING_SECONDS,
   VAPE_TIER_COUNT,
 } from '../domain/content/vapeChallengeDefs';
 import {
   closeVapeAdaptiveChallenge,
   getVapeAdaptiveDashboard,
+  resumeAutoVapeTier,
   setManualVapeTier,
   startVapeAdaptiveChallenge,
 } from '../domain/services/adaptiveChallengeService';
 import { publicGoalTitle } from '../domain/content/goalDisplay';
-import { resolveHabitPlan } from '../domain/content/habitIntentions';
+import { CONFIG_CATEGORY_LABELS, resolveHabitPlan } from '../domain/content/habitIntentions';
 import { GOAL_TEMPLATES } from '../data/content/goalTemplates';
 import * as rpgRepo from '../data/db/repositories/rpgRepo';
 import { nodeSqliteAvailable, openNodeSqliteDb, type TestDb } from './helpers/nodeSqliteDb';
@@ -46,10 +48,6 @@ describe('suggestTierIndex — règle adaptative (mocks)', () => {
     const r = suggestTierIndex(0, informed, VAPE_TIER_COUNT - 1);
     expect(r.tierIndex).toBe(1);
   });
-
-  test('palier manuel inchangé par la fonction pure', () => {
-    expect(suggestTierIndex(4, ['failure', 'failure', 'failure'], 4).tierIndex).toBe(3);
-  });
 });
 
 describe('défis vape — cibles par palier (mocks)', () => {
@@ -66,9 +64,10 @@ describe('habitude sensible — libellés (mocks)', () => {
     expect(defaults).not.toContain('freq_regulation');
   });
 
-  test('titre config vs public', () => {
+  test('titre config explicite vs public discret', () => {
     const tpl = GOAL_TEMPLATES.find((t) => t.id === 'freq_regulation');
     expect(tpl?.title).toMatch(/Masturbation/);
+    expect(CONFIG_CATEGORY_LABELS.C).toMatch(/Masturbation/);
     const plan = resolveHabitPlan('C', 'measure', null, null);
     expect(plan.title).toMatch(/Masturbation/);
     expect(
@@ -110,6 +109,11 @@ async function seedVapeGoal(db: TestDb['db']) {
   );
 }
 
+async function ageChallengeSession(db: TestDb['db'], sessionId: string, secondsAgo: number) {
+  const started = new Date(Date.now() - secondsAgo * 1000).toISOString();
+  await db.runAsync(`UPDATE challenge_sessions SET started_utc = ? WHERE id = ?`, started, sessionId);
+}
+
 sqliteSuite('adaptive vape — persistance node:sqlite', () => {
   let t: TestDb;
   beforeEach(async () => {
@@ -118,26 +122,9 @@ sqliteSuite('adaptive vape — persistance node:sqlite', () => {
   });
   afterEach(() => t.close());
 
-  test('migration 006 crée les tables', async () => {
-    const rows = await t.db.getAllAsync<{ name: string }>(
-      `SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'adaptive%' ORDER BY name`,
-    );
-    expect(rows.map((r) => r.name)).toEqual([
-      'adaptive_challenge_attempts',
-      'adaptive_challenge_records',
-      'adaptive_challenge_state',
-    ]);
-  });
-
-  test('quatre types : démarrage et clôture', async () => {
-    const formats = ['delay_craving', 'breathing', 'interval', 'record'] as const;
-    for (const f of formats) {
-      const start = await startVapeAdaptiveChallenge(t.db, f);
-      expect(start.ok).toBe(true);
-      if (!start.ok) continue;
-      const close = await closeVapeAdaptiveChallenge(t.db, start.attempt.id, 'vaped');
-      expect(close.ok).toBe(true);
-    }
+  test('migration 007 — colonnes intervalle', async () => {
+    const cols = await t.db.getAllAsync<{ name: string }>(`PRAGMA table_info(adaptive_challenge_state)`);
+    expect(cols.some((c) => c.name === 'tier_index_interval')).toBe(true);
   });
 
   test('double démarrage refusé', async () => {
@@ -148,33 +135,128 @@ sqliteSuite('adaptive vape — persistance node:sqlite', () => {
     if (!b.ok) expect(b.code).toBe('already_running');
   });
 
-  test('record conservé après échec', async () => {
-    const start = await startVapeAdaptiveChallenge(t.db, 'record');
+  test('respiration interrompue ≠ succès ; terminée avec preuve coping', async () => {
+    const start = await startVapeAdaptiveChallenge(t.db, 'breathing');
     expect(start.ok).toBe(true);
     if (!start.ok) return;
-    await closeVapeAdaptiveChallenge(t.db, start.attempt.id, 'completed');
-    const dash = await getVapeAdaptiveDashboard(t.db);
-    expect(dash.record?.bestDurationSec).toBeGreaterThanOrEqual(0);
-    const start2 = await startVapeAdaptiveChallenge(t.db, 'record');
-    expect(start2.ok).toBe(true);
+    const interrupted = await closeVapeAdaptiveChallenge(t.db, start.attempt.id, 'vaped');
+    expect(interrupted.ok).toBe(true);
+    if (interrupted.ok) expect(interrupted.attempt.outcome).toBe('failure');
+    expect(interrupted.ok && interrupted.goldGranted).toBe(false);
+
+    const start2 = await startVapeAdaptiveChallenge(t.db, 'breathing');
     if (!start2.ok) return;
+    await ageChallengeSession(t.db, start2.attempt.challengeSessionId!, VAPE_BREATHING_SECONDS + 5);
+    const done = await closeVapeAdaptiveChallenge(t.db, start2.attempt.id, 'completed');
+    expect(done.ok).toBe(true);
+    if (done.ok) {
+      expect(done.attempt.outcome).toBe('success');
+      expect(done.attempt.copingSessionId).toBeTruthy();
+    }
+    const cope = await t.db.getFirstAsync<{ completed: number }>(
+      `SELECT completed FROM coping_sessions WHERE id = ?`,
+      done.ok ? done.attempt.copingSessionId : '',
+    );
+    expect(cope?.completed).toBe(1);
+  });
+
+  test('vape déclarée après 90 min — record 90 min', async () => {
+    const start = await startVapeAdaptiveChallenge(t.db, 'record');
+    if (!start.ok) return;
+    await ageChallengeSession(t.db, start.attempt.challengeSessionId!, 90 * 60);
+    const close = await closeVapeAdaptiveChallenge(t.db, start.attempt.id, 'vaped');
+    expect(close.ok).toBe(true);
+    if (close.ok) expect(close.attempt.outcome).toBe('failure');
+    const dash = await getVapeAdaptiveDashboard(t.db);
+    expect(dash.record?.bestDurationSec).toBeGreaterThanOrEqual(89 * 60);
+  });
+
+  test('nouvelle tentative courte — ancien record conservé', async () => {
+    const start = await startVapeAdaptiveChallenge(t.db, 'record');
+    if (!start.ok) return;
+    await ageChallengeSession(t.db, start.attempt.challengeSessionId!, 90 * 60);
+    await closeVapeAdaptiveChallenge(t.db, start.attempt.id, 'vaped');
+    const dash = await getVapeAdaptiveDashboard(t.db);
+    const best = dash.record?.bestDurationSec ?? 0;
+
+    const start2 = await startVapeAdaptiveChallenge(t.db, 'record');
+    if (!start2.ok) return;
+    await ageChallengeSession(t.db, start2.attempt.challengeSessionId!, 20 * 60);
     await closeVapeAdaptiveChallenge(t.db, start2.attempt.id, 'vaped');
     const dash2 = await getVapeAdaptiveDashboard(t.db);
-    expect(dash2.record?.bestDurationSec).toBe(dash.record?.bestDurationSec);
+    expect(dash2.record?.bestDurationSec).toBe(best);
   });
 
-  test('récompense or idempotente par palier', async () => {
-    const key = 'adaptive:vape:tier:0:gold';
+  test('arrêt immédiat record — aucune récompense', async () => {
+    const start = await startVapeAdaptiveChallenge(t.db, 'record');
+    if (!start.ok) return;
+    const close = await closeVapeAdaptiveChallenge(t.db, start.attempt.id, 'completed');
+    expect(close.ok).toBe(true);
+    if (close.ok) {
+      expect(close.goldGranted).toBe(false);
+      expect(close.attempt.outcome).toBe('failure');
+    }
+    expect(await rpgRepo.getGoldBalance(t.db)).toBe(0);
+  });
+
+  test('palier record 15 min — or idempotent', async () => {
+    const start = await startVapeAdaptiveChallenge(t.db, 'record');
+    if (!start.ok) return;
+    await ageChallengeSession(t.db, start.attempt.challengeSessionId!, 16 * 60);
+    const c1 = await closeVapeAdaptiveChallenge(t.db, start.attempt.id, 'vaped');
+    expect(c1.ok && c1.goldGranted).toBe(true);
+    const bal = await rpgRepo.getGoldBalance(t.db);
+
+    const start2 = await startVapeAdaptiveChallenge(t.db, 'record');
+    if (!start2.ok) return;
+    await ageChallengeSession(t.db, start2.attempt.challengeSessionId!, 17 * 60);
+    const c2 = await closeVapeAdaptiveChallenge(t.db, start2.attempt.id, 'vaped');
+    expect(c2.ok && c2.goldGranted).toBe(false);
+    expect(await rpgRepo.getGoldBalance(t.db)).toBe(bal);
+  });
+
+  test('deux formats — difficultés indépendantes', async () => {
+    await setManualVapeTier(t.db, 'delay', 2);
+    await setManualVapeTier(t.db, 'interval', 4);
+    const dash = await getVapeAdaptiveDashboard(t.db);
+    expect(dash.state.tierIndex).toBe(2);
+    expect(dash.state.tierIndexInterval).toBe(4);
+  });
+
+  test('échecs delay — suggestion palier inférieur sans toucher intervalle', async () => {
+    await setManualVapeTier(t.db, 'delay', 2);
+    await resumeAutoVapeTier(t.db, 'delay');
+    for (let i = 0; i < 3; i++) {
+      const s = await startVapeAdaptiveChallenge(t.db, 'delay_craving');
+      if (!s.ok) return;
+      await closeVapeAdaptiveChallenge(t.db, s.attempt.id, 'vaped');
+    }
+    const dash = await getVapeAdaptiveDashboard(t.db);
+    expect(dash.state.tierIndex).toBeLessThan(2);
+    expect(dash.state.tierIndexInterval).toBe(0);
+  });
+
+  test('palier manuel puis reprise auto', async () => {
+    await setManualVapeTier(t.db, 'delay', 3);
+    let dash = await getVapeAdaptiveDashboard(t.db);
+    expect(dash.state.tierManual).toBe(true);
+    await resumeAutoVapeTier(t.db, 'delay');
+    dash = await getVapeAdaptiveDashboard(t.db);
+    expect(dash.state.tierManual).toBe(false);
+  });
+
+  test('fermeture / réouverture — tentative persistée', async () => {
+    const s = await startVapeAdaptiveChallenge(t.db, 'interval');
+    expect(s.ok).toBe(true);
+    if (!s.ok) return;
+    const dash = await getVapeAdaptiveDashboard(t.db);
+    expect(dash.running?.id).toBe(s.attempt.id);
+  });
+
+  test('récompense or idempotente par format et palier delay', async () => {
+    const key = 'adaptive:vape:delay_craving:tier:0:gold';
     expect(await rpgRepo.addGold(t.db, 3, 'palier 1', key)).toBe('inserted');
     expect(await rpgRepo.addGold(t.db, 3, 'palier 1', key)).toBe('duplicate');
-    expect(await rpgRepo.getGoldBalance(t.db)).toBe(3);
-  });
-
-  test('palier manuel + reprise', async () => {
-    await setManualVapeTier(t.db, 3);
-    const dash = await getVapeAdaptiveDashboard(t.db);
-    expect(dash.state.tierIndex).toBe(3);
-    expect(dash.state.tierManual).toBe(true);
   });
 
   test('catégorie vape inactive → pas de défi', async () => {

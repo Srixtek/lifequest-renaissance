@@ -11,21 +11,27 @@ import {
   closeVapeAdaptiveChallenge,
   formatDefLabel,
   getVapeAdaptiveDashboard,
+  resumeAutoVapeTier,
   setManualVapeTier,
   startVapeAdaptiveChallenge,
   type VapeAdaptiveDashboard,
 } from '@/src/domain/services/adaptiveChallengeService';
 import { displayElapsedSec } from '@/src/domain/services/challengeService';
-import { getById as getSessionById } from '@/src/data/db/repositories/challengeSessionRepo';
+import type { ChallengeSession } from '@/src/domain/models/challengeSession';
 import {
   delayMinutesForTier,
+  highestRecordMilestoneMinutes,
   intervalMinutesForTier,
+  VAPE_BREATHING_SECONDS,
   VAPE_DELAY_TIER_MINUTES,
+  VAPE_INTERVAL_TIER_MINUTES,
+  VAPE_RECORD_MILESTONE_MINUTES,
   VAPE_TIER_COUNT,
   vapeChallengeDef,
 } from '@/src/domain/content/vapeChallengeDefs';
 import type { VapeChallengeFormat } from '@/src/domain/models/adaptiveChallenge';
 import { formatChallengeHms, progressTowardTarget } from '@/src/domain/rules/challengeDuration';
+import { breathPhaseAtElapsedMs } from '@/src/domain/rules/breathingRhythm';
 import { friendlyDbError } from '@/src/utils/dbErrors';
 
 const FORMATS: VapeChallengeFormat[] = ['delay_craving', 'breathing', 'interval', 'record'];
@@ -38,24 +44,36 @@ function attemptLine(outcome: string, format: VapeChallengeFormat, dur: number |
   return `${label} · ${st} · ${d}`;
 }
 
+function nextRecordMilestoneSec(bestSec: number): number | null {
+  for (const m of VAPE_RECORD_MILESTONE_MINUTES) {
+    const sec = m * 60;
+    if (bestSec < sec) return sec;
+  }
+  return null;
+}
+
 export default function VapeAdaptiveScreen() {
   const insets = useSafeAreaInsets();
   const [dash, setDash] = useState<VapeAdaptiveDashboard | null>(null);
-  const [tick, setTick] = useState(0);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const startLock = useRef(false);
   const closeLock = useRef(false);
   const [elapsed, setElapsed] = useState(0);
+  const [runningSession, setRunningSession] = useState<ChallengeSession | null>(null);
+  const [breathPhase, setBreathPhase] = useState<'inspire' | 'expire'>('inspire');
 
   const reload = useCallback(async () => {
     const db = await getDb();
     const d = await getVapeAdaptiveDashboard(db);
     setDash(d);
     if (d.running?.challengeSessionId) {
-      const s = await getSessionById(db, d.running.challengeSessionId);
+      const { getById } = await import('@/src/data/db/repositories/challengeSessionRepo');
+      const s = await getById(db, d.running.challengeSessionId);
+      setRunningSession(s);
       setElapsed(s ? displayElapsedSec(s) : 0);
     } else {
+      setRunningSession(null);
       setElapsed(0);
     }
   }, []);
@@ -67,23 +85,17 @@ export default function VapeAdaptiveScreen() {
   );
 
   useEffect(() => {
-    if (!dash?.running) return;
+    if (!runningSession) return;
     const id = setInterval(() => {
-      setTick((n) => n + 1);
-      void (async () => {
-        const db = await getDb();
-        const sid = dash.running?.challengeSessionId;
-        if (!sid) return;
-        const s = await getSessionById(db, sid);
-        if (s) setElapsed(displayElapsedSec(s));
-      })();
+      const e = displayElapsedSec(runningSession);
+      setElapsed(e);
+      setBreathPhase(breathPhaseAtElapsedMs(e * 1000));
     }, 1000);
     return () => clearInterval(id);
-  }, [dash?.running]);
+  }, [runningSession]);
 
-  void tick;
-
-  const tier = dash?.state.tierIndex ?? 0;
+  const delayTier = dash?.state.tierIndex ?? 0;
+  const intervalTier = dash?.state.tierIndexInterval ?? 0;
 
   const start = async (format: VapeChallengeFormat) => {
     if (startLock.current || busy) return;
@@ -124,10 +136,12 @@ export default function VapeAdaptiveScreen() {
       const parts = [];
       if (r.tierMessage) parts.push(r.tierMessage);
       if (r.goldGranted) parts.push(`+${3} or pour ce palier confirmé.`);
-      if (mode === 'vaped') parts.push('Durée enregistrée — le record précédent est conservé.');
-      else if (r.attempt.outcome === 'success') parts.push('Bien joué — rien ne valide l\'abstinence à ta place.');
-      else if (mode === 'unknown') parts.push('Résultat laissé non renseigné.');
-      else parts.push('Session interrompue — non comptée comme réussite.');
+      if (mode === 'vaped' && dash.running.format === 'record') {
+        parts.push('Durée tenue enregistrée dans ton record si c\'est ton meilleur temps.');
+      } else if (r.attempt.outcome === 'success') {
+        parts.push('Bien joué — rien ne valide l\'abstinence à ta place.');
+      } else if (mode === 'unknown') parts.push('Résultat laissé non renseigné.');
+      else parts.push('Session interrompue ou palier non atteint — non comptée comme réussite.');
       setMsg(parts.join(' '));
       await reload();
     } catch (err) {
@@ -138,13 +152,31 @@ export default function VapeAdaptiveScreen() {
     }
   };
 
-  const pickTier = async (idx: number) => {
+  const pickTier = async (track: 'delay' | 'interval', idx: number) => {
     setBusy(true);
     try {
       const db = await getDb();
-      await setManualVapeTier(db, idx);
+      await setManualVapeTier(db, track, idx);
       await reload();
-      setMsg('Palier choisi manuellement — l\'ajustement auto attend la fin du défi en cours.');
+      setMsg(
+        track === 'delay'
+          ? 'Palier retard choisi manuellement.'
+          : 'Palier intervalle choisi manuellement.',
+      );
+    } catch (err) {
+      setMsg(friendlyDbError(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const resumeAuto = async (track: 'delay' | 'interval') => {
+    setBusy(true);
+    try {
+      const db = await getDb();
+      await resumeAutoVapeTier(db, track);
+      await reload();
+      setMsg('Suggestions automatiques réactivées pour ce type de défi.');
     } catch (err) {
       setMsg(friendlyDbError(err));
     } finally {
@@ -155,6 +187,16 @@ export default function VapeAdaptiveScreen() {
   const running = dash?.running;
   const targetSec = running?.targetDurationSec ?? null;
   const progress = progressTowardTarget(elapsed, targetSec);
+  const canValidate =
+    running != null &&
+    (running.format === 'record'
+      ? elapsed >= 60
+      : targetSec != null
+        ? elapsed >= targetSec
+        : false);
+
+  const recordBest = dash?.record?.bestDurationSec ?? 0;
+  const nextRecord = nextRecordMilestoneSec(recordBest);
 
   return (
     <Screen style={{ paddingTop: 0 }}>
@@ -178,51 +220,108 @@ export default function VapeAdaptiveScreen() {
         ) : null}
 
         <FantasyPanel accent>
-          <Text style={styles.panelTitle}>Difficulté</Text>
+          <Text style={styles.panelTitle}>Difficulté — retarder une envie</Text>
           <Body>
-            Palier actuel : {tier + 1}/{VAPE_TIER_COUNT} ({delayMinutesForTier(tier)} min de retard)
+            Palier actuel : {delayTier + 1}/{VAPE_TIER_COUNT} — cible {delayMinutesForTier(delayTier)} min
           </Body>
           {dash?.nextTierMinutes != null ? (
-            <Body muted>Prochain palier : {dash.nextTierMinutes} minutes de retard.</Body>
-          ) : (
-            <Body muted>Tu es au palier le plus élevé proposé pour l'instant.</Body>
-          )}
+            <Body muted>Prochain palier : {dash.nextTierMinutes} min de retard.</Body>
+          ) : null}
           <View style={styles.row}>
             {VAPE_DELAY_TIER_MINUTES.map((_, i) => (
-              <Chip key={i} label={`${i + 1}`} selected={tier === i} onPress={() => void pickTier(i)} />
+              <Chip key={i} label={`${i + 1}`} selected={delayTier === i} onPress={() => void pickTier('delay', i)} />
             ))}
           </View>
+          {dash?.state.tierManual ? (
+            <Button label="Reprendre suggestions auto (retard)" variant="ghost" onPress={() => void resumeAuto('delay')} />
+          ) : null}
+
+          <Text style={[styles.panelTitle, { marginTop: spacing.md }]}>Difficulté — intervalle sans vape</Text>
+          <Body>
+            Palier actuel : {intervalTier + 1}/{VAPE_TIER_COUNT} — cible {intervalMinutesForTier(intervalTier)} min
+          </Body>
+          {dash?.nextIntervalTierMinutes != null ? (
+            <Body muted>Prochain palier : {dash.nextIntervalTierMinutes} min.</Body>
+          ) : null}
+          <View style={styles.row}>
+            {VAPE_INTERVAL_TIER_MINUTES.map((_, i) => (
+              <Chip
+                key={`iv${i}`}
+                label={`${i + 1}`}
+                selected={intervalTier === i}
+                onPress={() => void pickTier('interval', i)}
+              />
+            ))}
+          </View>
+          {dash?.state.tierManualInterval ? (
+            <Button
+              label="Reprendre suggestions auto (intervalle)"
+              variant="ghost"
+              onPress={() => void resumeAuto('interval')}
+            />
+          ) : null}
+
           {dash?.record ? (
-            <Body>
-              Meilleur record déclaré : {formatChallengeHms(dash.record.bestDurationSec)} (
-              {formatDefLabel(dash.record.format)})
-            </Body>
+            <View style={{ marginTop: spacing.sm }}>
+              <Body>
+                Meilleur record : {formatChallengeHms(dash.record.bestDurationSec)}
+                {nextRecord != null
+                  ? ` · prochain palier or : ${formatChallengeHms(nextRecord)}`
+                  : highestRecordMilestoneMinutes(recordBest)
+                    ? ' · paliers record atteints'
+                    : ''}
+              </Body>
+            </View>
           ) : (
-            <Body muted>Aucun record personnel enregistré pour l'instant.</Body>
+            <View style={{ marginTop: spacing.sm }}>
+              <Body muted>
+                Aucun record personnel — premier palier or possible dès {VAPE_RECORD_MILESTONE_MINUTES[0]} min.
+              </Body>
+            </View>
           )}
         </FantasyPanel>
 
         {running ? (
           <View style={styles.heroCard}>
             <Text style={styles.heroTitle}>{formatDefLabel(running.format)}</Text>
+            {targetSec != null ? (
+              <Body muted>
+                Cible du défi : {formatChallengeHms(targetSec)} — durée actuelle ci-dessous.
+              </Body>
+            ) : (
+              <Body muted>Chronomètre multi-jours — déclare quand tu vapes ou termine au palier record.</Body>
+            )}
             <Text style={styles.timer}>{formatChallengeHms(elapsed)}</Text>
+            {running.format === 'breathing' ? (
+              <Text style={styles.phase}>{breathPhase === 'inspire' ? 'Inspire… (4 s)' : 'Expire… (6 s)'}</Text>
+            ) : null}
             {progress != null ? (
               <ProgressBar progress={progress} label="Vers la cible du défi" />
-            ) : (
-              <Body muted>Chronomètre multi-jours — ferme quand tu veux déclarer le résultat.</Body>
-            )}
+            ) : null}
             <View style={styles.row}>
               {running.format === 'record' ? (
                 <Button label="J'ai vapoté" variant="ghost" disabled={busy} onPress={() => void close('vaped')} />
               ) : null}
               <Button
-                label={running.format === 'record' ? 'Terminer ce défi' : "J'ai tenu — valider"}
-                disabled={busy}
+                label={
+                  running.format === 'record'
+                    ? 'Terminer (palier record atteint)'
+                    : running.format === 'breathing'
+                      ? 'Séance terminée (3 min)'
+                      : "J'ai tenu — valider"
+                }
+                disabled={busy || !canValidate}
                 onPress={() => void close('completed')}
               />
               {running.format !== 'record' ? (
-                <Button label="Interrompu" variant="secondary" disabled={busy} onPress={() => void close('vaped')} />
+                <Button label="Interrompu / envie cédée" variant="secondary" disabled={busy} onPress={() => void close('vaped')} />
               ) : null}
+              <Button
+                label="Arrêter sans renseigner"
+                variant="ghost"
+                disabled={busy}
+                onPress={() => void close('unknown')}
+              />
             </View>
           </View>
         ) : (
@@ -232,12 +331,12 @@ export default function VapeAdaptiveScreen() {
               const def = vapeChallengeDef(f);
               const hint =
                 f === 'delay_craving'
-                  ? `${delayMinutesForTier(tier)} min`
+                  ? `cible ${delayMinutesForTier(delayTier)} min`
                   : f === 'interval'
-                    ? `${intervalMinutesForTier(tier)} min`
+                    ? `cible ${intervalMinutesForTier(intervalTier)} min`
                     : f === 'breathing'
-                      ? '3 min'
-                      : 'multi-jours';
+                      ? `séance guidée ${VAPE_BREATHING_SECONDS / 60} min (4s/6s)`
+                      : `palier or dès ${VAPE_RECORD_MILESTONE_MINUTES[0]} min`;
               return (
                 <View key={f} style={styles.recRow}>
                   <View style={{ flex: 1 }}>
@@ -287,6 +386,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginVertical: spacing.md,
   },
+  phase: { color: colors.ink, textAlign: 'center', marginBottom: spacing.sm, fontSize: 18 },
   recRow: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -7,6 +7,7 @@ import {
   VAPE_TIER_COUNT,
   VAPE_TIER_GOLD_REWARD,
   delayMinutesForTier,
+  highestRecordMilestoneMinutes,
   intervalMinutesForTier,
   nextTierObjectiveMinutes,
   vapeChallengeDef,
@@ -16,6 +17,7 @@ import type {
   AdaptiveChallengeRecord,
   AdaptiveChallengeState,
   VapeChallengeFormat,
+  VapeTierTrack,
 } from '../models/adaptiveChallenge';
 import { VAPE_HABIT_CATEGORY } from '../models/adaptiveChallenge';
 import { informedOutcomesFromAttempts, suggestTierIndex } from '../rules/adaptiveTier';
@@ -27,6 +29,7 @@ import {
 } from './challengeService';
 import { nowIso } from '../rules/dates';
 import { createId } from '../../utils/id';
+import { recordBreathingSessionOnConn } from './vapeBreathingSession';
 
 export type StartAdaptiveResult =
   | { ok: true; attempt: AdaptiveChallengeAttempt }
@@ -42,14 +45,27 @@ export interface VapeAdaptiveDashboard {
   running: AdaptiveChallengeAttempt | null;
   recommended: VapeChallengeFormat[];
   nextTierMinutes: number | null;
+  nextIntervalTierMinutes: number | null;
   record: AdaptiveChallengeRecord | null;
   history: AdaptiveChallengeAttempt[];
+}
+
+function tierIndexForFormat(state: AdaptiveChallengeState, format: VapeChallengeFormat): number {
+  if (format === 'interval') return state.tierIndexInterval;
+  if (format === 'delay_craving') return state.tierIndex;
+  return 0;
 }
 
 function targetSecForFormat(format: VapeChallengeFormat, tierIndex: number): number | null {
   if (format === 'delay_craving') return delayMinutesForTier(tierIndex) * 60;
   if (format === 'breathing') return VAPE_BREATHING_SECONDS;
   if (format === 'interval') return intervalMinutesForTier(tierIndex) * 60;
+  return null;
+}
+
+function tierTrackForFormat(format: VapeChallengeFormat): VapeTierTrack | null {
+  if (format === 'delay_craving') return 'delay';
+  if (format === 'interval') return 'interval';
   return null;
 }
 
@@ -67,25 +83,45 @@ export async function getVapeAdaptiveDashboard(db: Db): Promise<VapeAdaptiveDash
   const recommended: VapeChallengeFormat[] = vapeActive
     ? ['delay_craving', 'breathing', 'interval', 'record']
     : [];
+  const nextInterval = state.tierIndexInterval + 1;
   return {
     vapeActive,
     state,
     running,
     recommended,
     nextTierMinutes: nextTierObjectiveMinutes(state.tierIndex),
+    nextIntervalTierMinutes:
+      nextInterval < VAPE_TIER_COUNT ? intervalMinutesForTier(nextInterval) : null,
     record,
     history,
   };
 }
 
-export async function setManualVapeTier(db: Db, tierIndex: number): Promise<AdaptiveChallengeState> {
+export async function setManualVapeTier(
+  db: Db,
+  track: VapeTierTrack,
+  tierIndex: number,
+): Promise<AdaptiveChallengeState> {
   const clamped = Math.max(0, Math.min(tierIndex, VAPE_TIER_COUNT - 1));
   const now = nowIso();
   await db.withExclusiveTransactionAsync(async (tx) => {
     await adaptiveRepo.getOrInitState(tx, VAPE_HABIT_CATEGORY);
-    await adaptiveRepo.updateStateTier(tx, VAPE_HABIT_CATEGORY, clamped, true, now);
+    if (track === 'delay') {
+      await adaptiveRepo.updateStateTier(tx, VAPE_HABIT_CATEGORY, clamped, true, now);
+    } else {
+      await adaptiveRepo.updateStateIntervalTier(tx, VAPE_HABIT_CATEGORY, clamped, true, now);
+    }
   });
-  return (await adaptiveRepo.getOrInitState(db, VAPE_HABIT_CATEGORY));
+  return adaptiveRepo.getOrInitState(db, VAPE_HABIT_CATEGORY);
+}
+
+export async function resumeAutoVapeTier(db: Db, track: VapeTierTrack): Promise<AdaptiveChallengeState> {
+  const now = nowIso();
+  await db.withExclusiveTransactionAsync(async (tx) => {
+    await adaptiveRepo.getOrInitState(tx, VAPE_HABIT_CATEGORY);
+    await adaptiveRepo.resumeAutoTier(tx, VAPE_HABIT_CATEGORY, track, now);
+  });
+  return adaptiveRepo.getOrInitState(db, VAPE_HABIT_CATEGORY);
 }
 
 export async function startVapeAdaptiveChallenge(
@@ -104,8 +140,9 @@ export async function startVapeAdaptiveChallenge(
       return;
     }
     const state = await adaptiveRepo.getOrInitState(tx, VAPE_HABIT_CATEGORY);
+    const tierSnap = tierIndexForFormat(state, format);
     const now = nowIso();
-    const targetSec = targetSecForFormat(format, state.tierIndex);
+    const targetSec = targetSecForFormat(format, tierSnap);
     const sessionRes = await startChallengeSessionOnConn(tx, 'no_vape', targetSec);
     if (!sessionRes.ok) {
       result = { ok: false, code: 'session_busy' };
@@ -115,9 +152,10 @@ export async function startVapeAdaptiveChallenge(
       id: createId('avad'),
       habitCategory: VAPE_HABIT_CATEGORY,
       format,
-      tierIndex: state.tierIndex,
+      tierIndex: tierSnap,
       outcome: 'running',
       challengeSessionId: sessionRes.session.id,
+      copingSessionId: null,
       targetDurationSec: targetSec,
       declaredDurationSec: null,
       startedAt: now,
@@ -135,19 +173,27 @@ async function applyTierAfterClose(
   tx: Db,
   attempt: AdaptiveChallengeAttempt,
 ): Promise<string | null> {
+  const track = tierTrackForFormat(attempt.format);
+  if (!track || attempt.format === 'breathing' || attempt.format === 'record') return null;
   const state = await adaptiveRepo.getOrInitState(tx, VAPE_HABIT_CATEGORY);
-  if (state.tierManual) return null;
-  const raw = await adaptiveRepo.listInformedOutcomes(tx, VAPE_HABIT_CATEGORY, 12);
+  const manual = track === 'delay' ? state.tierManual : state.tierManualInterval;
+  if (manual) return null;
+  const currentTier = track === 'delay' ? state.tierIndex : state.tierIndexInterval;
+  const raw = await adaptiveRepo.listInformedOutcomesForFormat(
+    tx,
+    VAPE_HABIT_CATEGORY,
+    attempt.format,
+    12,
+  );
   const informed = informedOutcomesFromAttempts(raw);
-  const suggestion = suggestTierIndex(state.tierIndex, informed, VAPE_TIER_COUNT - 1);
-  if (suggestion.tierIndex !== state.tierIndex) {
-    await adaptiveRepo.updateStateTier(
-      tx,
-      VAPE_HABIT_CATEGORY,
-      suggestion.tierIndex,
-      false,
-      nowIso(),
-    );
+  const suggestion = suggestTierIndex(currentTier, informed, VAPE_TIER_COUNT - 1);
+  const now = nowIso();
+  if (suggestion.tierIndex !== currentTier) {
+    if (track === 'delay') {
+      await adaptiveRepo.updateStateTier(tx, VAPE_HABIT_CATEGORY, suggestion.tierIndex, false, now);
+    } else {
+      await adaptiveRepo.updateStateIntervalTier(tx, VAPE_HABIT_CATEGORY, suggestion.tierIndex, false, now);
+    }
   }
   return suggestion.adjusted ? suggestion.message : null;
 }
@@ -158,11 +204,26 @@ async function maybeGrantTierGold(
   success: boolean,
 ): Promise<boolean> {
   if (!success) return false;
-  const key = `adaptive:vape:tier:${attempt.tierIndex}:gold`;
+  const track = tierTrackForFormat(attempt.format);
+  if (!track) return false;
+  const key = `adaptive:vape:${attempt.format}:tier:${attempt.tierIndex}:gold`;
   const r = await rpgRepo.addGold(
     tx,
     VAPE_TIER_GOLD_REWARD,
-    `Palier vape ${attempt.tierIndex + 1} confirmé`,
+    `Palier vape (${attempt.format}) ${attempt.tierIndex + 1} confirmé`,
+    key,
+  );
+  return r === 'inserted';
+}
+
+async function maybeGrantRecordMilestoneGold(tx: Db, durationSec: number): Promise<boolean> {
+  const milestone = highestRecordMilestoneMinutes(durationSec);
+  if (milestone == null) return false;
+  const key = `adaptive:vape:record:milestone:${milestone}:gold`;
+  const r = await rpgRepo.addGold(
+    tx,
+    VAPE_TIER_GOLD_REWARD,
+    `Record vape — palier ${milestone} min`,
     key,
   );
   return r === 'inserted';
@@ -173,10 +234,18 @@ function successFromSession(
   durationSec: number,
   targetSec: number | null,
   completed: boolean,
+  mode: 'completed' | 'vaped' | 'unknown',
+  breathingCompleted: boolean,
 ): boolean {
+  if (mode !== 'completed') return false;
   if (!completed) return false;
-  if (format === 'record') return true;
-  if (targetSec == null) return false;
+  if (format === 'breathing') {
+    return breathingCompleted && durationSec >= VAPE_BREATHING_SECONDS;
+  }
+  if (format === 'record') {
+    return highestRecordMilestoneMinutes(durationSec) != null;
+  }
+  if (targetSec == null || targetSec < 1) return false;
   return durationSec >= targetSec;
 }
 
@@ -209,11 +278,37 @@ export async function closeVapeAdaptiveChallenge(
     }
     const durationSec = Math.max(0, sessionClose.session.durationSec);
     const completed = sessionClose.session.state === 'completed';
+    let breathingCompleted = false;
+    let copingSessionId: string | null = null;
+
+    if (attempt.format === 'breathing') {
+      const breathDone = mode === 'completed' && completed && durationSec >= VAPE_BREATHING_SECONDS;
+      const cope = await recordBreathingSessionOnConn(
+        tx,
+        breathDone ? VAPE_BREATHING_SECONDS : durationSec,
+        breathDone,
+        { vapeAttemptId: attemptId },
+      );
+      copingSessionId = cope.copingSessionId;
+      breathingCompleted = breathDone;
+      await adaptiveRepo.setAttemptCopingSessionId(tx, attemptId, copingSessionId);
+    }
+
     const success =
       mode === 'unknown'
         ? false
-        : successFromSession(attempt.format, durationSec, attempt.targetDurationSec, completed);
-    const outcome = mode === 'unknown' ? 'unknown' : success ? 'success' : 'failure';
+        : successFromSession(
+            attempt.format,
+            durationSec,
+            attempt.targetDurationSec,
+            completed,
+            mode,
+            breathingCompleted,
+          );
+    const outcome =
+      mode === 'unknown' ? 'unknown' : attempt.format === 'record' && mode === 'vaped' ? 'failure' : success
+        ? 'success'
+        : 'failure';
     const ended = nowIso();
     const closed = await adaptiveRepo.closeAttempt(tx, attemptId, {
       outcome,
@@ -225,18 +320,33 @@ export async function closeVapeAdaptiveChallenge(
       result = { ok: false, code: 'already_closed' };
       return;
     }
-    if (success && (attempt.format === 'record' || attempt.format === 'interval')) {
+
+    if (attempt.format === 'record' && durationSec > 0) {
       await adaptiveRepo.upsertRecordIfBetter(tx, {
         habitCategory: VAPE_HABIT_CATEGORY,
-        format: attempt.format === 'record' ? 'record' : attempt.format,
+        format: 'record',
+        bestDurationSec: durationSec,
+        attemptId,
+        achievedAt: ended,
+      });
+    } else if (success && attempt.format === 'interval') {
+      await adaptiveRepo.upsertRecordIfBetter(tx, {
+        habitCategory: VAPE_HABIT_CATEGORY,
+        format: 'interval',
         bestDurationSec: durationSec,
         attemptId,
         achievedAt: ended,
       });
     }
+
     const updated = (await adaptiveRepo.getAttemptById(tx, attemptId))!;
     const tierMessage = await applyTierAfterClose(tx, updated);
-    const goldGranted = await maybeGrantTierGold(tx, updated, success);
+    let goldGranted = false;
+    if (attempt.format === 'record') {
+      goldGranted = await maybeGrantRecordMilestoneGold(tx, durationSec);
+    } else {
+      goldGranted = await maybeGrantTierGold(tx, updated, success);
+    }
     result = { ok: true, attempt: updated, tierMessage, goldGranted };
   });
   return result;

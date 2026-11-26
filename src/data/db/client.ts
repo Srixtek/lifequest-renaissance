@@ -5,6 +5,7 @@ import migration003 from './migrations/003_daily_rewards';
 import migration004 from './migrations/004_challenge_sessions';
 import migration005 from './migrations/005_quest_board';
 import migration006 from './migrations/006_adaptive_challenges';
+import migration007 from './migrations/007_vape_reliability';
 
 export type Db = SQLite.SQLiteDatabase;
 
@@ -15,6 +16,7 @@ const MIGRATIONS: Array<{ version: number; sql: string }> = [
   { version: 4, sql: migration004 },
   { version: 5, sql: migration005 },
   { version: 6, sql: migration006 },
+  { version: 7, sql: migration007 },
 ];
 
 let dbPromise: Promise<Db> | null = null;
