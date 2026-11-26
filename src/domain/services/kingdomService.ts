@@ -52,13 +52,32 @@ export async function getKingdomView(db: Conn) {
   };
 }
 
-export async function confirmForgeUpgrade(db: Db): Promise<{ ok: boolean; code?: string; message: string }> {
-  let result: { ok: boolean; code?: string; message: string } = {
-    ok: false,
-    message: 'Impossible.',
-  };
+export type ForgeUpgradeResult = {
+  ok: boolean;
+  code?: string;
+  message: string;
+  status?: 'spent' | 'duplicate' | 'inconsistent';
+};
+
+export async function confirmForgeUpgrade(
+  db: Db,
+  expectedCurrentLevel: number,
+): Promise<ForgeUpgradeResult> {
+  if (!Number.isInteger(expectedCurrentLevel) || expectedCurrentLevel < 0 || expectedCurrentLevel > FORGE_MAX_LEVEL) {
+    return { ok: false, code: 'invalid_level', message: 'Niveau de forge invalide.', status: 'inconsistent' };
+  }
+  let result: ForgeUpgradeResult = { ok: false, message: 'Impossible.' };
   await db.withExclusiveTransactionAsync(async (tx) => {
     const forge = await kingdomRepo.getForgeLevel(tx);
+    if (forge.level !== expectedCurrentLevel) {
+      result = {
+        ok: false,
+        code: 'level_mismatch',
+        message: `La forge est au niveau ${forge.level} (attendu ${expectedCurrentLevel}). Rafraîchis et réessaie.`,
+        status: 'inconsistent',
+      };
+      return;
+    }
     if (forge.level >= FORGE_MAX_LEVEL) {
       result = { ok: false, code: 'max_level', message: 'La forge est déjà au maximum.' };
       return;
@@ -74,15 +93,28 @@ export async function confirmForgeUpgrade(db: Db): Promise<{ ok: boolean; code?:
     if (spent === 'duplicate') {
       const current = await kingdomRepo.getForgeLevel(tx);
       if (current.level >= next) {
-        result = { ok: true, message: `Forge déjà au niveau ${current.level}.` };
+        result = {
+          ok: true,
+          code: 'duplicate',
+          message: `Forge déjà au niveau ${current.level}.`,
+          status: 'duplicate',
+        };
         return;
       }
+      result = {
+        ok: false,
+        code: 'inconsistent',
+        message: 'Dépense déjà enregistrée mais le niveau de forge est incohérent.',
+        status: 'inconsistent',
+      };
+      return;
     }
     const now = new Date().toISOString();
     await kingdomRepo.setForgeLevel(tx, next, now);
     result = {
       ok: true,
       message: `${FORGE_LEVEL_LABELS[next]} — +${FORGE_DAMAGE_PER_LEVEL} dégât de base au combat.`,
+      status: 'spent',
     };
   });
   return result;
@@ -118,12 +150,22 @@ export async function startCombat(db: Db): Promise<{ ok: boolean; message: strin
 export async function performCombatAction(
   db: Db,
   action: CombatAction,
-): Promise<{ ok: boolean; message: string }> {
-  let result = { ok: false, message: 'Action impossible.' };
+  clientTurn: number,
+  clientRevision: string,
+): Promise<{ ok: boolean; code?: string; message: string }> {
+  let result: { ok: boolean; code?: string; message: string } = { ok: false, message: 'Action impossible.' };
   await db.withExclusiveTransactionAsync(async (tx) => {
     const stored = await kingdomRepo.getCombatState(tx);
     if (!stored.active || stored.outcome) {
       result = { ok: false, message: 'Aucun combat actif.' };
+      return;
+    }
+    if (stored.turnNumber !== clientTurn || stored.updatedAt !== clientRevision) {
+      result = {
+        ok: false,
+        code: 'stale',
+        message: 'Tour déjà résolu — le combat a avancé, réessaie.',
+      };
       return;
     }
     const forge = await kingdomRepo.getForgeLevel(tx);
@@ -142,7 +184,9 @@ export async function performCombatAction(
     };
 
     if (updated.outcome === 'victory' && !stored.firstWinRewarded) {
-      await rpgRepo.grantItem(tx, FIRST_WIN_ITEM_ID);
+      const banner = await rpgRepo.grantItemOnce(tx, FIRST_WIN_ITEM_ID);
+      if (banner === 'granted') next.firstWinRewarded = true;
+    } else if (stored.firstWinRewarded) {
       next.firstWinRewarded = true;
     }
 

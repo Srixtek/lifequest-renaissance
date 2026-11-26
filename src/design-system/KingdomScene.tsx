@@ -13,6 +13,8 @@ type Props = {
 
 export function KingdomScene({ forgeLevel, onZone, height = 220 }: Props) {
   const forgeGlow = forgeLevel >= 2 ? colors.goldBright : forgeLevel >= 1 ? colors.gold : colors.muted;
+  const emberOpacity = forgeLevel >= 2 ? 1 : forgeLevel >= 1 ? 0.75 : 0.35;
+  const chimneyH = forgeLevel >= 2 ? 10 : forgeLevel >= 1 ? 6 : 0;
   return (
     <View style={[styles.wrap, { height }]}>
       <Svg width="100%" height={height} viewBox="0 0 360 220">
@@ -32,10 +34,22 @@ export function KingdomScene({ forgeLevel, onZone, height = 220 }: Props) {
         <Path d="M140 175 L180 118 L220 175 Z" fill="#2A5A4A" stroke={colors.goldDim} strokeWidth="0.8" />
         <Rect x="172" y="150" width="16" height="24" rx="2" fill={colors.copperDim} />
         <Circle cx="180" cy="142" r="10" fill={colors.ember} opacity={0.5} />
-        {/* forge */}
-        <Rect x="228" y="138" width="44" height="36" rx="4" fill="#4A3728" stroke={forgeGlow} strokeWidth={1.4} />
+        {/* forge : 0=ruine, 1=feu, 2=cheminée renforcée */}
+        <Rect x="228" y="138" width="44" height="36" rx="4" fill="#4A3728" stroke={forgeGlow} strokeWidth={forgeLevel >= 2 ? 2 : 1.4} />
         <Rect x="238" y="148" width="24" height="16" rx="2" fill={forgeLevel > 0 ? colors.ember : '#2A1810'} />
-        {forgeLevel >= 2 ? <Rect x="234" y="132" width="32" height="6" rx="2" fill={colors.copper} /> : null}
+        {forgeLevel >= 1 ? (
+          <Circle cx="250" cy="156" r="4" fill={colors.ember} opacity={emberOpacity} />
+        ) : null}
+        {chimneyH > 0 ? (
+          <Rect
+            x={forgeLevel >= 2 ? 234 : 242}
+            y={138 - chimneyH}
+            width={forgeLevel >= 2 ? 32 : 16}
+            height={chimneyH}
+            rx={2}
+            fill={forgeLevel >= 2 ? colors.copper : colors.copperDim}
+          />
+        ) : null}
         {/* arène */}
         <EllipseArena />
         <Path

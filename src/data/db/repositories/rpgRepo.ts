@@ -69,6 +69,22 @@ export async function grantItem(db: Conn, itemId: string): Promise<void> {
   }
 }
 
+/** Trophées uniques : une seule unité en inventaire (idempotent). */
+export async function grantItemOnce(db: Conn, itemId: string): Promise<'granted' | 'duplicate'> {
+  const existing = await db.getFirstAsync<{ quantity: number }>(
+    'SELECT quantity FROM inventory_items WHERE item_id = ?',
+    itemId,
+  );
+  if (existing) return 'duplicate';
+  await db.runAsync(
+    `INSERT INTO inventory_items (id, item_id, quantity, acquired_at) VALUES (?, ?, 1, ?)`,
+    `inv_${itemId}`,
+    itemId,
+    new Date().toISOString(),
+  );
+  return 'granted';
+}
+
 export async function listEquipment(db: Conn): Promise<EquipmentSlot[]> {
   const rows = await db.getAllAsync<any>('SELECT * FROM equipment_slots');
   return rows.map((r) => ({ slot: r.slot, itemId: r.item_id }));

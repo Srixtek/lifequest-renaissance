@@ -189,7 +189,7 @@ export default function AdventureScreen() {
                         disabled={kingdomBusy || !kingdom.canUpgrade}
                         onPress={() =>
                           runKingdom(async (db) => {
-                            const r = await confirmForgeUpgrade(db);
+                            const r = await confirmForgeUpgrade(db, kingdom.forge.level);
                             setForgeConfirm(false);
                             return { message: r.message };
                           })
@@ -210,27 +210,34 @@ export default function AdventureScreen() {
             {combatOpen && (kingdom.combat.active || kingdom.combat.outcome) ? (
               <CombatPanel
                 combat={kingdom.combat}
+                classId={kingdom.classId}
                 skillLabel={skillNameForClass(kingdom.classId)}
                 skillReady={skillReady}
                 busy={kingdomBusy}
-                onAttack={() =>
-                  runKingdom(async (db) => {
-                    const r = await performCombatAction(db, 'attack');
+                onAttack={() => {
+                  const turn = kingdom.combat.turnNumber;
+                  const rev = kingdom.combat.updatedAt;
+                  return runKingdom(async (db) => {
+                    const r = await performCombatAction(db, 'attack', turn, rev);
                     return { message: r.message };
-                  })
-                }
-                onDefend={() =>
-                  runKingdom(async (db) => {
-                    const r = await performCombatAction(db, 'defend');
+                  });
+                }}
+                onDefend={() => {
+                  const turn = kingdom.combat.turnNumber;
+                  const rev = kingdom.combat.updatedAt;
+                  return runKingdom(async (db) => {
+                    const r = await performCombatAction(db, 'defend', turn, rev);
                     return { message: r.message };
-                  })
-                }
-                onSkill={() =>
-                  runKingdom(async (db) => {
-                    const r = await performCombatAction(db, 'skill');
+                  });
+                }}
+                onSkill={() => {
+                  const turn = kingdom.combat.turnNumber;
+                  const rev = kingdom.combat.updatedAt;
+                  return runKingdom(async (db) => {
+                    const r = await performCombatAction(db, 'skill', turn, rev);
                     return { message: r.message };
-                  })
-                }
+                  });
+                }}
                 onLeave={() =>
                   runKingdom(async (db) => {
                     await dismissCombat(db);

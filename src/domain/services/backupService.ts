@@ -1,6 +1,8 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import JSZip from 'jszip';
 import type { Db } from '../../data/db/client';
+import { migrate } from '../../data/db/client';
+import * as kingdomRepo from '../../data/db/repositories/kingdomRepo';
 
 const TABLES = [
   'profiles',
@@ -29,6 +31,34 @@ const TABLES = [
   'kingdom_buildings',
   'kingdom_combat',
 ] as const;
+
+/** Ordre enfants → parents (FK) pour un vidage sans orphelins. */
+const WIPE_ORDER: readonly string[] = [
+  'adaptive_challenge_attempts',
+  'adaptive_challenge_records',
+  'adaptive_challenge_state',
+  'challenge_sessions',
+  'daily_reward_goals',
+  'tracking_events',
+  'goal_versions',
+  'goal_definitions',
+  'journal_entries',
+  'coping_sessions',
+  'xp_ledger',
+  'wallet_ledger',
+  'inventory_items',
+  'equipment_slots',
+  'quest_instances',
+  'story_flags',
+  'kingdom_combat',
+  'kingdom_buildings',
+  'character_progress',
+  'adventure_state',
+  'daily_reward_days',
+  'profiles',
+  'settings',
+  'backup_metadata',
+];
 
 export interface BackupPreview {
   pseudo: string | null;
@@ -104,43 +134,30 @@ export async function previewBackup(uri: string): Promise<BackupPreview> {
   };
 }
 
-/** Full replace import. Caller should export a safety backup first. */
-export async function importBackup(db: Db, uri: string): Promise<BackupPreview> {
-  const base64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
-  const zip = await JSZip.loadAsync(base64, { base64: true });
-  const manifest = JSON.parse(await zip.file('manifest.json')!.async('string'));
+/** Applique un dump JSON (tests node:sqlite et import fichier). */
+export async function importBackupPayload(
+  db: Db,
+  manifest: { format?: string; appVersion?: string },
+  data: Record<string, any[]>,
+): Promise<void> {
   if (manifest.format !== 'lqbackup') throw new Error('Format de sauvegarde inconnu');
-  const data = JSON.parse(await zip.file('data.json')!.async('string')) as Record<string, any[]>;
+
+  const preMigrations = await db.getAllAsync<{ version: number; applied_at: string }>(
+    'SELECT version, applied_at FROM schema_migrations',
+  );
+  const preMaxVersion = preMigrations.reduce((m, r) => Math.max(m, r.version), 0);
 
   await db.withTransactionAsync(async () => {
-    const wipe = [
-      'challenge_sessions',
-      'daily_reward_goals',
-      'daily_reward_days',
-      'tracking_events',
-      'goal_versions',
-      'goal_definitions',
-      'journal_entries',
-      'coping_sessions',
-      'xp_ledger',
-      'wallet_ledger',
-      'inventory_items',
-      'quest_instances',
-      'story_flags',
-      'profiles',
-      'settings',
-      'backup_metadata',
-    ];
-    for (const t of wipe) {
-      await db.execAsync(`DELETE FROM ${t}`);
+    for (const t of WIPE_ORDER) {
+      try {
+        await db.execAsync(`DELETE FROM ${t}`);
+      } catch {
+        /* table absente sur anciennes bases */
+      }
     }
-    await db.execAsync(`DELETE FROM character_progress`);
-    await db.execAsync(`DELETE FROM adventure_state`);
-    await db.execAsync(`DELETE FROM equipment_slots`);
-    await db.execAsync(`DELETE FROM kingdom_buildings`);
-    await db.execAsync(`DELETE FROM kingdom_combat`);
 
     for (const t of TABLES) {
+      if (t === 'schema_migrations') continue;
       const rows = data[t] ?? [];
       for (const row of rows) {
         const keys = Object.keys(row);
@@ -153,14 +170,65 @@ export async function importBackup(db: Db, uri: string): Promise<BackupPreview> 
       }
     }
 
+    const backupMigrations = data.schema_migrations ?? [];
+    for (const row of backupMigrations) {
+      await db.runAsync(
+        `INSERT OR REPLACE INTO schema_migrations (version, applied_at) VALUES (?, ?)`,
+        row.version,
+        row.applied_at,
+      );
+    }
+
+    const importedMax = backupMigrations.reduce((m: number, r: { version: number }) => Math.max(m, r.version), 0);
+    if (preMaxVersion > importedMax) {
+      for (const row of preMigrations) {
+        if (row.version > importedMax) {
+          await db.runAsync(
+            `INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)`,
+            row.version,
+            row.applied_at,
+          );
+        }
+      }
+    }
+
     await db.runAsync(
       `INSERT INTO backup_metadata (id, last_export_at, last_import_at, app_version)
        VALUES (1, NULL, ?, ?)
        ON CONFLICT(id) DO UPDATE SET last_import_at=excluded.last_import_at, app_version=excluded.app_version`,
       new Date().toISOString(),
-      manifest.appVersion,
+      manifest.appVersion ?? '0.1.0',
     );
   });
 
+  await migrate(db);
+  await kingdomRepo.ensureKingdomDefaults(db);
+}
+
+/** Full replace import. Caller should export a safety backup first. */
+export async function importBackup(db: Db, uri: string): Promise<BackupPreview> {
+  const base64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
+  const zip = await JSZip.loadAsync(base64, { base64: true });
+  const manifest = JSON.parse(await zip.file('manifest.json')!.async('string'));
+  const data = JSON.parse(await zip.file('data.json')!.async('string')) as Record<string, any[]>;
+  await importBackupPayload(db, manifest, data);
   return previewBackup(uri);
+}
+
+export async function exportBackupPayload(db: Db, appVersion = '0.1.0'): Promise<{
+  manifest: Record<string, unknown>;
+  data: Record<string, any[]>;
+}> {
+  const data = await dumpDb(db);
+  const exportedAt = new Date().toISOString();
+  return {
+    manifest: {
+      format: 'lqbackup',
+      version: 1,
+      appVersion,
+      exportedAt,
+      tables: TABLES,
+    },
+    data,
+  };
 }

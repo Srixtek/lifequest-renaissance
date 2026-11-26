@@ -1,13 +1,17 @@
 import React from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import Svg, { Circle, Path } from 'react-native-svg';
 import { THORN_GUARDIAN_NAME } from '../data/content/kingdom';
 import type { CombatSnapshot } from '../domain/combat/combatEngine';
+import type { ClassId } from '../domain/models/types';
 import { Button, Body } from './ui';
 import { colors, spacing, typography } from './theme';
 import { FantasyPanel } from './FantasyPanel';
+import { ClassSymbol } from './icons';
 
 type Props = {
-  combat: CombatSnapshot & { active: boolean };
+  combat: CombatSnapshot & { active: boolean; updatedAt: string };
+  classId: ClassId;
   skillLabel: string;
   skillReady: boolean;
   busy: boolean;
@@ -17,8 +21,16 @@ type Props = {
   onLeave?: () => void;
 };
 
+const CLASS_LABELS: Record<ClassId, string> = {
+  rodeur: 'Rôdeur',
+  gardien: 'Gardien',
+  sage: 'Sage',
+  artisan: 'Artisan',
+};
+
 export function CombatPanel({
   combat,
+  classId,
   skillLabel,
   skillReady,
   busy,
@@ -29,16 +41,31 @@ export function CombatPanel({
 }: Props) {
   const intent =
     combat.enemyIntent === 'power' ? 'Frappe lourde imminente' : 'Attaque normale imminente';
+  const intentTint = combat.enemyIntent === 'power' ? colors.warn : colors.muted;
   return (
     <FantasyPanel>
+      <View style={styles.fighters}>
+        <View style={styles.fighter}>
+          <ClassSymbol classId={classId} size={28} />
+          <Text style={styles.fighterLabel}>{CLASS_LABELS[classId]}</Text>
+        </View>
+        <Text style={styles.vs}>vs</Text>
+        <View style={styles.fighter}>
+          <GuardianIcon />
+          <Text style={styles.fighterLabel} numberOfLines={1}>
+            Gardien
+          </Text>
+        </View>
+      </View>
       <Text style={styles.title}>{THORN_GUARDIAN_NAME}</Text>
+      <View style={[styles.intentBadge, { borderColor: intentTint }]}>
+        <Text style={[styles.intentText, { color: intentTint }]}>{intent}</Text>
+      </View>
       <View style={styles.bars}>
         <HpBar label="Héros" current={combat.heroHp} max={combat.heroHpMax} tint={colors.emerald} />
         <HpBar label="Ennemi" current={combat.enemyHp} max={combat.enemyHpMax} tint={colors.warn} />
       </View>
-      <Body muted>
-        Tour {combat.turnNumber} — {intent}
-      </Body>
+      <Body muted>Tour {combat.turnNumber}</Body>
       {combat.outcome ? (
         <Text style={combat.outcome === 'victory' ? styles.win : styles.lose}>
           {combat.outcome === 'victory' ? 'Victoire' : 'Défaite'}
@@ -93,7 +120,30 @@ function HpBar({
   );
 }
 
+function GuardianIcon() {
+  return (
+    <Svg width={28} height={28} viewBox="0 0 24 24">
+      <Circle cx="12" cy="8" r="5" fill={colors.warn} opacity={0.85} />
+      <Path d="M6 20 Q12 14 18 20" stroke={colors.emeraldDim} strokeWidth={1.5} fill={colors.mist} />
+      <Path d="M8 12 L10 16 M16 12 L14 16" stroke={colors.copper} strokeWidth={1.2} />
+    </Svg>
+  );
+}
+
 const styles = StyleSheet.create({
+  fighters: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.xs },
+  fighter: { alignItems: 'center', gap: 2, flex: 1 },
+  fighterLabel: { ...typography.caption, color: colors.muted, fontSize: 10 },
+  vs: { ...typography.caption, color: colors.line, marginHorizontal: spacing.xs },
+  intentBadge: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingVertical: 4,
+    paddingHorizontal: spacing.sm,
+    marginBottom: spacing.sm,
+    alignSelf: 'flex-start',
+  },
+  intentText: { ...typography.caption, fontWeight: '700' },
   title: { ...typography.subtitle, color: colors.gold, marginBottom: spacing.sm },
   bars: { gap: spacing.sm, marginBottom: spacing.sm },
   hpWrap: { marginBottom: 4 },

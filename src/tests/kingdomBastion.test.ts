@@ -79,7 +79,7 @@ suite('006A — bastion royaume', () => {
 
   test('forge : amélioration atomique, idempotence clé building:forge:level:N', async () => {
     await seedGold(t, 30);
-    const r1 = await confirmForgeUpgrade(t.db);
+    const r1 = await confirmForgeUpgrade(t.db, 0);
     expect(r1.ok).toBe(true);
     expect((await kingdomRepo.getForgeLevel(t.db)).level).toBe(1);
     expect(await ledgerSum(t, 'gold')).toBe(20);
@@ -91,11 +91,11 @@ suite('006A — bastion royaume', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].amount).toBe(-FORGE_UPGRADE_COST[1]);
 
-    await confirmForgeUpgrade(t.db);
+    await confirmForgeUpgrade(t.db, 1);
     expect((await kingdomRepo.getForgeLevel(t.db)).level).toBe(2);
     expect(await ledgerSum(t, 'gold')).toBe(0);
 
-    const dup = await confirmForgeUpgrade(t.db);
+    const dup = await confirmForgeUpgrade(t.db, 2);
     expect(dup).toMatchObject({ ok: false, code: 'max_level' });
     expect(await ledgerSum(t, 'gold')).toBe(0);
   });
@@ -110,7 +110,7 @@ suite('006A — bastion royaume', () => {
     let safety = 0;
     while (view.combat.active && !view.combat.outcome && safety < 20) {
       const act = view.combat.skillCooldown <= 0 ? 'skill' : 'attack';
-      await performCombatAction(t.db, act);
+      await performCombatAction(t.db, act, view.combat.turnNumber, view.combat.updatedAt);
       view = await getKingdomView(t.db);
       safety += 1;
     }
@@ -125,10 +125,10 @@ suite('006A — bastion royaume', () => {
     safety = 0;
     view = await getKingdomView(t.db);
     while (view.combat.active && !view.combat.outcome && safety < 30) {
-      await performCombatAction(t.db, 'defend');
+      await performCombatAction(t.db, 'defend', view.combat.turnNumber, view.combat.updatedAt);
       view = await getKingdomView(t.db);
       if (view.combat.outcome === 'defeat') break;
-      await performCombatAction(t.db, 'attack');
+      await performCombatAction(t.db, 'attack', view.combat.turnNumber, view.combat.updatedAt);
       view = await getKingdomView(t.db);
       safety += 1;
     }
@@ -145,14 +145,16 @@ suite('006A — bastion royaume', () => {
   test('combat jouable à 0 or', async () => {
     expect(await ledgerSum(t, 'gold')).toBe(0);
     expect((await startCombat(t.db)).ok).toBe(true);
-    expect((await performCombatAction(t.db, 'attack')).ok).toBe(true);
+    const cv = await getKingdomView(t.db);
+    expect((await performCombatAction(t.db, 'attack', cv.combat.turnNumber, cv.combat.updatedAt)).ok).toBe(true);
   });
 
   test('reprise après redémarrage DB', async () => {
     const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'lq-kingdom-')), 'lq.db');
     let first = await openNodeSqliteDb(file);
     await startCombat(first.db);
-    await performCombatAction(first.db, 'attack');
+    const fv = await getKingdomView(first.db);
+    await performCombatAction(first.db, 'attack', fv.combat.turnNumber, fv.combat.updatedAt);
     first.close();
 
     const again = await openNodeSqliteDb(file);
