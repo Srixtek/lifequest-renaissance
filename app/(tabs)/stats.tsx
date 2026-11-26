@@ -1,8 +1,8 @@
 import { useCallback, useState } from 'react';
-import { ScrollView, View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import Svg, { Rect, Text as SvgText } from 'react-native-svg';
-import { Body, Chip, Screen, Title } from '@/src/design-system/ui';
+import { Body, Chip, TabScrollView } from '@/src/design-system/ui';
 import { colors, spacing } from '@/src/design-system/theme';
 import { useAppStore } from '@/src/state/appStore';
 import { getDb } from '@/src/data/db/client';
@@ -30,9 +30,7 @@ export default function StatsScreen() {
   );
 
   return (
-    <Screen>
-      <ScrollView contentContainerStyle={{ paddingBottom: spacing.xxl, paddingTop: spacing.sm }}>
-        <Title>Statistiques</Title>
+    <TabScrollView>
         <Body muted>Réel et RPG sont séparés. Les dénominateurs sont visibles.</Body>
 
         <Text style={styles.section}>RPG</Text>
@@ -91,8 +89,7 @@ export default function StatsScreen() {
           </View>
           );
         })}
-      </ScrollView>
-    </Screen>
+    </TabScrollView>
   );
 }
 

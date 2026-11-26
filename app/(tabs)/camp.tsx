@@ -1,8 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Body, Screen, SecondaryLink } from '@/src/design-system/ui';
+import { Body, SecondaryLink, TabScrollView } from '@/src/design-system/ui';
 import { CollapsibleSection } from '@/src/design-system/CollapsibleSection';
 import { colors, spacing, typography } from '@/src/design-system/theme';
 import { ForestScene } from '@/src/design-system/ForestScene';
@@ -39,7 +38,6 @@ function todayStatusLabel(
 }
 
 export default function CampScreen() {
-  const insets = useSafeAreaInsets();
   const router = useRouter();
   const profile = useAppStore((s) => s.profile);
   const character = useAppStore((s) => s.character);
@@ -115,15 +113,8 @@ export default function CampScreen() {
   const shards = character?.shards ?? 0;
 
   return (
-    <Screen style={{ paddingHorizontal: 0, paddingTop: 0 }}>
-      <ScrollView
-        contentContainerStyle={{
-          paddingBottom: insets.bottom + spacing.xxl,
-          paddingHorizontal: spacing.lg,
-        }}
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={{ paddingTop: Math.max(insets.top, spacing.sm) }}>
+    <TabScrollView safeTop flushHorizontal>
+        <View>
           <ForestScene />
           <View style={styles.heroOverlay}>
             <Text style={styles.realm}>Eloria</Text>
@@ -223,8 +214,7 @@ export default function CampScreen() {
             </View>
           ) : null}
         </CollapsibleSection>
-      </ScrollView>
-    </Screen>
+    </TabScrollView>
   );
 }
 
@@ -239,8 +229,8 @@ function ResourceChip({ label, value }: { label: string; value: string }) {
 
 const styles = StyleSheet.create({
   heroOverlay: {
-    marginTop: -spacing.md,
-    paddingTop: spacing.xs,
+    marginTop: -spacing.sm,
+    paddingTop: 0,
   },
   realm: { ...typography.label, color: colors.gold },
   pseudo: { ...typography.hero, color: colors.ink, marginTop: 4 },
@@ -264,7 +254,7 @@ const styles = StyleSheet.create({
   },
   chipValue: { fontSize: 18, fontWeight: '700', color: colors.goldBright },
   chipLabel: { ...typography.caption, color: colors.muted, marginTop: 2 },
-  sectionTitle: { ...typography.title, color: colors.ink, marginTop: spacing.xl, fontSize: 20 },
+  sectionTitle: { ...typography.title, color: colors.ink, marginTop: spacing.lg, fontSize: 20 },
   panelTitle: { ...typography.subtitle, color: colors.gold, marginBottom: spacing.sm },
   quickRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md },
 });

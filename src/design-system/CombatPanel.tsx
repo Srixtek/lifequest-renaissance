@@ -101,51 +101,76 @@ export function CombatPanel({
             <CombatFighterArt kind="enemy" enemyId={enemyId} size={visual.fighterSize} pulse={!combat.outcome} />
           </FighterSlot>
         </View>
-        <HpBar inScene current={combat.heroHp} max={combat.heroHpMax} tint={colors.emerald} style={styles.heroHp} />
-        <HpBar inScene current={combat.enemyHp} max={combat.enemyHpMax} tint={colors.warn} style={styles.enemyHp} />
+        <HpBar
+          inScene
+          label={`${combat.heroHp}`}
+          current={combat.heroHp}
+          max={combat.heroHpMax}
+          tint={colors.emerald}
+          style={styles.heroHp}
+        />
+        <HpBar
+          inScene
+          label={`${combat.enemyHp}`}
+          current={combat.enemyHp}
+          max={combat.enemyHpMax}
+          tint={colors.warn}
+          style={styles.enemyHp}
+        />
       </View>
 
-      <View style={styles.telegraphRow}>
-        <Text style={styles.title} numberOfLines={2}>
-          {enemyDisplayName(enemyId)}
+      <View style={styles.hpNumericRow}>
+        <Text style={styles.hpNumeric}>
+          Héros {combat.heroHp}/{combat.heroHpMax} PV
         </Text>
-        <ConcentrationMeter value={combat.concentration} max={CONCENTRATION_MAX} />
-      </View>
-      <View style={[styles.intentBadge, { borderColor: intent.tint }]}>
-        <Text style={[styles.intentText, { color: intent.tint }]} numberOfLines={2}>
-          {intent.label}
+        <Text style={styles.hpNumeric}>
+          {enemyDisplayName(enemyId)} {combat.enemyHp}/{combat.enemyHpMax} PV
         </Text>
       </View>
-      <View style={styles.turnLine}>
-        <Body muted>Tour {combat.turnNumber} · compétence : {SKILL_CONCENTRATION_COST} concentration</Body>
-      </View>
+
       {combat.outcome ? (
-        <View style={[styles.outcome, combat.outcome === 'victory' ? styles.winStage : styles.loseStage]}>
-          <Text style={combat.outcome === 'victory' ? styles.win : styles.lose}>
-            {combat.outcome === 'victory' ? 'Victoire' : 'Défaite'}
-          </Text>
-        </View>
+        <OutcomeRecap combat={combat} classId={classId} enemyName={enemyDisplayName(enemyId)} />
       ) : (
-        <View style={styles.actions}>
-          <View style={styles.actionRow}>
-            <View style={styles.actionPrimary}>
-              <Button label="Attaquer" onPress={onAttack} disabled={busy} />
-            </View>
-            <View style={styles.actionSide}>
-              <Button label="Défendre" variant="ghost" onPress={onDefend} disabled={busy} />
-              <Button
-                label={skillReady ? skillLabel : `${skillLabel} (${SKILL_CONCENTRATION_COST})`}
-                variant="ghost"
-                onPress={onSkill}
-                disabled={busy || !skillReady}
-              />
+        <>
+          <View style={styles.telegraphRow}>
+            <Text style={styles.title} numberOfLines={2}>
+              {enemyDisplayName(enemyId)}
+            </Text>
+            <ConcentrationMeter value={combat.concentration} max={CONCENTRATION_MAX} />
+          </View>
+          <View style={[styles.intentBadge, { borderColor: intent.tint }]}>
+            <Text style={[styles.intentText, { color: intent.tint }]} numberOfLines={2}>
+              {intent.label}
+            </Text>
+          </View>
+          <View style={styles.turnLine}>
+            <Body muted>
+              Tour {combat.turnNumber} · compétence : {SKILL_CONCENTRATION_COST} concentration
+            </Body>
+          </View>
+          <View style={styles.actions}>
+            <Button label="Attaquer" onPress={onAttack} disabled={busy} />
+            <View style={styles.actionRow}>
+              <View style={styles.actionHalf}>
+                <Button label="Défendre" variant="secondary" onPress={onDefend} disabled={busy} compact />
+              </View>
+              <View style={styles.actionHalf}>
+                <Button
+                  label={skillReady ? skillLabel : `${skillLabel} (${SKILL_CONCENTRATION_COST})`}
+                  variant="secondary"
+                  onPress={onSkill}
+                  disabled={busy || !skillReady}
+                  compact
+                />
+              </View>
             </View>
           </View>
-        </View>
+        </>
       )}
       {combat.outcome && onLeave ? (
         <Button label="Revenir au bastion" variant="ghost" onPress={onLeave} disabled={busy} />
       ) : null}
+      <Text style={styles.logHeading}>Journal du combat</Text>
       <ScrollView style={styles.log} nestedScrollEnabled>
         {combat.log.slice(-8).map((line, i) => (
           <Text key={`${i}-${line.slice(0, 12)}`} style={styles.logLine}>
@@ -154,6 +179,30 @@ export function CombatPanel({
         ))}
       </ScrollView>
     </FantasyPanel>
+  );
+}
+
+function OutcomeRecap({
+  combat,
+  classId,
+  enemyName,
+}: {
+  combat: CombatSnapshot;
+  classId: ClassId;
+  enemyName: string;
+}) {
+  const won = combat.outcome === 'victory';
+  const rewardLine = [...combat.log].reverse().find((l) => /bannière|inventaire|or\b/i.test(l));
+  return (
+    <View style={[styles.outcome, won ? styles.winStage : styles.loseStage]}>
+      <Text style={won ? styles.win : styles.lose}>{won ? 'Victoire' : 'Défaite'}</Text>
+      <Text style={styles.outcomeDetail}>
+        {CLASS_LABELS[classId]} · {combat.heroHp}/{combat.heroHpMax} PV — {enemyName} · {combat.enemyHp}/
+        {combat.enemyHpMax} PV
+      </Text>
+      {rewardLine ? <Text style={styles.outcomeReward}>{rewardLine}</Text> : null}
+      {!won ? <Text style={styles.outcomeHint}>Tu peux relancer un combat depuis l&apos;arène.</Text> : null}
+    </View>
   );
 }
 
@@ -208,6 +257,7 @@ function HpBar({
   if (inScene) {
     return (
       <View style={[styles.sceneHp, style]}>
+        {label ? <Text style={styles.sceneHpText}>{label}</Text> : null}
         <View style={styles.hpTrackThin}>
           <View style={[styles.hpFill, { width: `${pct * 100}%`, backgroundColor: tint }]} />
         </View>
@@ -247,9 +297,16 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs,
   },
   turnLine: { marginBottom: spacing.xs },
-  actionRow: { flexDirection: 'row', gap: spacing.sm, alignItems: 'stretch' },
-  actionPrimary: { flex: 1.1 },
-  actionSide: { flex: 1, gap: spacing.xs },
+  hpNumericRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+    flexWrap: 'wrap',
+  },
+  hpNumeric: { ...typography.caption, color: colors.muted, fontWeight: '700', flex: 1, minWidth: 120 },
+  actionRow: { flexDirection: 'row', gap: spacing.sm, alignItems: 'stretch', marginTop: spacing.xs },
+  actionHalf: { flex: 1, minWidth: 0 },
   fighters: {
     flexDirection: 'row',
     alignItems: 'flex-end',
@@ -263,10 +320,21 @@ const styles = StyleSheet.create({
   fighterEnd: { alignItems: 'center' },
   fighterLabel: { ...typography.caption, color: colors.muted, fontSize: 10, textAlign: 'center' },
   vs: { ...typography.caption, color: colors.line, marginBottom: spacing.md, flexShrink: 0 },
-  sceneHp: { position: 'absolute', width: '36%', maxWidth: 120 },
+  sceneHp: { position: 'absolute', width: '38%', maxWidth: 128 },
   heroHp: { left: spacing.sm, bottom: spacing.sm },
   enemyHp: { right: spacing.sm, bottom: spacing.sm },
-  hpTrackThin: { height: 5, borderRadius: 3, backgroundColor: colors.line, overflow: 'hidden' },
+  sceneHpText: {
+    ...typography.caption,
+    color: colors.ink,
+    fontWeight: '800',
+    fontSize: 11,
+    textAlign: 'center',
+    marginBottom: 2,
+    textShadowColor: 'rgba(0,0,0,0.65)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
+  hpTrackThin: { height: 6, borderRadius: 3, backgroundColor: colors.line, overflow: 'hidden' },
   intentBadge: {
     borderWidth: 1,
     borderRadius: 8,
@@ -291,12 +359,16 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   hpFill: { height: '100%', borderRadius: 4 },
-  actions: { marginVertical: spacing.sm },
-  log: { maxHeight: 120, marginTop: spacing.sm },
-  logLine: { ...typography.caption, color: colors.muted, marginBottom: 2 },
-  outcome: { borderRadius: 8, padding: spacing.sm, marginVertical: spacing.sm },
+  actions: { marginVertical: spacing.sm, gap: spacing.xs },
+  logHeading: { ...typography.caption, color: colors.copper, marginTop: spacing.sm, fontWeight: '700' },
+  log: { maxHeight: 96, marginTop: spacing.xs },
+  logLine: { ...typography.caption, color: colors.muted, marginBottom: 2, fontSize: 11 },
+  outcome: { borderRadius: 8, padding: spacing.md, marginVertical: spacing.sm, gap: spacing.xs },
   winStage: { backgroundColor: 'rgba(212,175,55,0.12)' },
   loseStage: { backgroundColor: 'rgba(180,90,70,0.12)' },
-  win: { color: colors.goldBright, fontWeight: '700', textAlign: 'center' },
-  lose: { color: colors.warn, textAlign: 'center' },
+  win: { color: colors.goldBright, fontWeight: '700', textAlign: 'center', fontSize: 18 },
+  lose: { color: colors.warn, textAlign: 'center', fontWeight: '700', fontSize: 18 },
+  outcomeDetail: { ...typography.caption, color: colors.muted, textAlign: 'center' },
+  outcomeReward: { ...typography.caption, color: colors.gold, textAlign: 'center', fontWeight: '600' },
+  outcomeHint: { ...typography.caption, color: colors.muted, textAlign: 'center', marginTop: spacing.xs },
 });

@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
-import { ScrollView, Text, View, StyleSheet } from 'react-native';
+import { Text, View, StyleSheet } from 'react-native';
 import { useFocusEffect } from 'expo-router';
-import { Body, Screen, Title } from '@/src/design-system/ui';
+import { Body, TabScrollView } from '@/src/design-system/ui';
 import { colors, spacing, typography } from '@/src/design-system/theme';
 import { FantasyPanel } from '@/src/design-system/FantasyPanel';
 import { ProgressBar } from '@/src/design-system/ProgressBar';
@@ -46,12 +46,10 @@ export default function CharacterScreen() {
   const shards = character?.shards ?? 0;
 
   return (
-    <Screen>
-      <ScrollView contentContainerStyle={{ paddingBottom: spacing.xxl, paddingTop: spacing.sm }}>
-        <Title>Fiche héros</Title>
+    <TabScrollView>
         <Body muted>Équipement, réserve et progression — données déjà en jeu.</Body>
 
-        <FantasyPanel accent style={{ marginTop: spacing.md }}>
+        <FantasyPanel accent style={{ marginTop: spacing.sm }}>
           <View style={styles.heroRow}>
             <HeroPortraitArt classId={classId} size={88} />
             <View style={styles.heroMeta}>
@@ -72,23 +70,6 @@ export default function CharacterScreen() {
             </View>
           </View>
         </FantasyPanel>
-
-        <View style={styles.resourceRow}>
-          <FantasyPanel style={styles.resourceCard}>
-            <Text style={styles.resourceKicker}>Or</Text>
-            <Text style={styles.goldValue}>{goldBalance}</Text>
-            <Text style={styles.hint}>
-              Gagné via les quêtes. Dépensable à la forge du bastion pour renforcer tes coups au combat.
-            </Text>
-          </FantasyPanel>
-          <FantasyPanel style={styles.resourceCard}>
-            <Text style={[styles.resourceKicker, styles.shardKicker]}>Éclats</Text>
-            <Text style={styles.shardValue}>{shards}</Text>
-            <Text style={styles.hint}>
-              Réserve narrative liée au camp. Distinct de l&apos;or du carnet de quêtes.
-            </Text>
-          </FantasyPanel>
-        </View>
 
         <Text style={styles.section}>Équipement</Text>
         {eq.length === 0 ? (
@@ -114,6 +95,19 @@ export default function CharacterScreen() {
           })
         )}
 
+        <View style={styles.resourceRow}>
+          <FantasyPanel style={styles.resourceCard}>
+            <Text style={styles.resourceKicker}>Or</Text>
+            <Text style={styles.goldValue}>{goldBalance}</Text>
+            <Text style={styles.hint}>Quêtes · forge du bastion</Text>
+          </FantasyPanel>
+          <FantasyPanel style={styles.resourceCard}>
+            <Text style={[styles.resourceKicker, styles.shardKicker]}>Éclats</Text>
+            <Text style={styles.shardValue}>{shards}</Text>
+            <Text style={styles.hint}>Camp · distinct de l&apos;or</Text>
+          </FantasyPanel>
+        </View>
+
         <Text style={styles.section}>Inventaire</Text>
         {inv.length === 0 ? (
           <FantasyPanel>
@@ -136,8 +130,7 @@ export default function CharacterScreen() {
 
         <Text style={[styles.section, styles.sectionMuted]}>Camp · niveau {character?.campLevel ?? 0}</Text>
         <Body muted>Améliore le camp depuis l&apos;accueil pour débloquer les prochaines étapes d&apos;Eloria.</Body>
-      </ScrollView>
-    </Screen>
+    </TabScrollView>
   );
 }
 
@@ -147,13 +140,13 @@ const styles = StyleSheet.create({
   pseudo: { ...typography.title, color: colors.ink },
   classLine: { ...typography.caption, color: colors.muted, marginBottom: spacing.xs },
   themeLine: { ...typography.caption, color: colors.gold, marginTop: spacing.xs },
-  resourceRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.md },
-  resourceCard: { flex: 1, minWidth: 140 },
+  resourceRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm },
+  resourceCard: { flex: 1, minWidth: 128, marginTop: 0 },
   resourceKicker: { ...typography.label, color: colors.gold, marginBottom: spacing.xs },
   shardKicker: { color: colors.emeraldBright },
-  goldValue: { ...typography.hero, color: colors.goldBright, fontSize: 26 },
-  shardValue: { ...typography.hero, color: colors.emeraldBright, fontSize: 26 },
-  section: { ...typography.label, color: colors.gold, marginTop: spacing.lg, marginBottom: spacing.sm },
+  goldValue: { ...typography.hero, color: colors.goldBright, fontSize: 22 },
+  shardValue: { ...typography.hero, color: colors.emeraldBright, fontSize: 22 },
+  section: { ...typography.label, color: colors.gold, marginTop: spacing.md, marginBottom: spacing.sm },
   sectionMuted: { color: colors.muted },
   slotCard: { marginBottom: spacing.sm },
   slotLabel: { ...typography.caption, color: colors.copper, fontWeight: '700', marginBottom: 4 },

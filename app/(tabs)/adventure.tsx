@@ -1,8 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
-import { ScrollView, View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Body, Button, Chip, Screen, Title } from '@/src/design-system/ui';
+import { Body, Button, Chip, Screen, TabScrollView } from '@/src/design-system/ui';
 import { FantasyPanel } from '@/src/design-system/FantasyPanel';
 import { QuestBoardCard } from '@/src/design-system/QuestBoardCard';
 import { EmptyState } from '@/src/design-system/QuestCard';
@@ -35,7 +34,6 @@ import { useAppStore } from '@/src/state/appStore';
 
 export default function AdventureScreen() {
   const router = useRouter();
-  const insets = useSafeAreaInsets();
   const refresh = useAppStore((s) => s.refresh);
   const [view, setView] = useState<Awaited<ReturnType<typeof getAdventureView>> | null>(null);
   const [kingdom, setKingdom] = useState<Awaited<ReturnType<typeof getKingdomView>> | null>(null);
@@ -156,14 +154,7 @@ export default function AdventureScreen() {
   const skillReady = skillAffordable(kingdom.combat);
 
   return (
-    <Screen>
-      <ScrollView
-        contentContainerStyle={{
-          paddingBottom: insets.bottom + spacing.xxl,
-          paddingTop: Math.max(insets.top, spacing.sm),
-        }}
-      >
-        <Title>Royaume</Title>
+    <TabScrollView>
         <Body muted>Le bastion d&apos;Eloria — touche une zone sur la carte, ou ouvre les quêtes ci-dessous.</Body>
         <View style={styles.tabs}>
           <Chip label="Bastion" selected={tab === 'royaume'} onPress={() => setTab('royaume')} />
@@ -192,23 +183,22 @@ export default function AdventureScreen() {
             ) : null}
             {kingdomMsg ? <Body muted>{kingdomMsg}</Body> : null}
             {forgeOpen ? (
-              <FantasyPanel>
-                <Text style={styles.section}>Forge du bastion</Text>
-                <Body>
-                  Niveau {kingdom.forge.level} — {FORGE_LEVEL_LABELS[kingdom.forge.level]}
-                </Body>
-                <Body muted>
-                  Dégâts au combat : {kingdom.forge.baseDamagePreview}. Prochain niveau :{' '}
-                  {kingdom.forge.nextLevel
-                    ? `${FORGE_LEVEL_LABELS[kingdom.forge.nextLevel]} (${kingdom.forge.upgradeCost} or)`
-                    : 'maximum atteint'}
-                </Body>
+              <FantasyPanel style={styles.forgePanel}>
+                <Text style={styles.forgeTitle}>
+                  Forge · {FORGE_LEVEL_LABELS[kingdom.forge.level]} (niv. {kingdom.forge.level})
+                </Text>
+                <Text style={styles.forgeMeta}>
+                  Dégâts {kingdom.forge.baseDamagePreview}
+                  {kingdom.forge.nextLevel && kingdom.forge.upgradeCost
+                    ? ` · prochain : ${FORGE_LEVEL_LABELS[kingdom.forge.nextLevel]} — ${kingdom.forge.upgradeCost} or`
+                    : ' · niveau max'}
+                </Text>
                 {kingdom.forge.nextLevel && kingdom.forge.upgradeCost ? (
                   forgeConfirm ? (
-                    <View style={{ marginTop: spacing.sm, gap: spacing.xs }}>
-                      <Body>Confirmer la dépense de {kingdom.forge.upgradeCost} or ?</Body>
+                    <View style={styles.forgeActions}>
+                      <Text style={styles.forgeConfirm}>Dépenser {kingdom.forge.upgradeCost} or ?</Text>
                       <Button
-                        label="Confirmer l'amélioration"
+                        label="Confirmer"
                         disabled={kingdomBusy || !kingdom.canUpgrade}
                         onPress={() =>
                           runKingdom(async (db) => {
@@ -217,14 +207,20 @@ export default function AdventureScreen() {
                             return { message: r.message };
                           })
                         }
+                        compact
                       />
-                      <Button label="Annuler" variant="ghost" onPress={() => setForgeConfirm(false)} />
+                      <Button label="Annuler" variant="ghost" onPress={() => setForgeConfirm(false)} compact />
                     </View>
                   ) : (
                     <Button
-                      label={`Améliorer (${kingdom.forge.upgradeCost} or)`}
+                      label={
+                        kingdom.canUpgrade
+                          ? `Améliorer · ${kingdom.forge.upgradeCost} or`
+                          : `Améliorer · ${kingdom.forge.upgradeCost} or (insuffisant)`
+                      }
                       disabled={!kingdom.canUpgrade || kingdomBusy}
                       onPress={() => setForgeConfirm(true)}
+                      compact
                     />
                   )
                 ) : null}
@@ -330,7 +326,7 @@ export default function AdventureScreen() {
         ) : null}
         {tab === 'trail' ? (
           <>
-            <Title>{view.node.title}</Title>
+            <Text style={styles.trailTitle}>{view.node.title}</Text>
             <Body>{view.node.description}</Body>
             {view.locked ? (
               <Text style={styles.warn}>Zone voilée — équipe la lanterne pour y voir clair.</Text>
@@ -364,8 +360,7 @@ export default function AdventureScreen() {
             <Body muted>Visité : {view.visited.join(' → ')}</Body>
           </>
         ) : null}
-      </ScrollView>
-    </Screen>
+    </TabScrollView>
   );
 }
 
@@ -376,4 +371,10 @@ const styles = StyleSheet.create({
   sectionSecondary: { color: colors.muted, marginTop: spacing.md },
   goldValue: { ...typography.title, color: colors.gold, marginBottom: spacing.xs },
   enemyRow: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: spacing.sm, gap: spacing.xs },
+  forgePanel: { marginTop: spacing.sm },
+  forgeTitle: { ...typography.subtitle, color: colors.gold, marginBottom: spacing.xs },
+  forgeMeta: { ...typography.caption, color: colors.muted, marginBottom: spacing.sm, lineHeight: 18 },
+  forgeActions: { gap: spacing.xs },
+  forgeConfirm: { ...typography.caption, color: colors.ink, marginBottom: spacing.xs },
+  trailTitle: { ...typography.title, color: colors.ink, marginBottom: spacing.sm },
 });

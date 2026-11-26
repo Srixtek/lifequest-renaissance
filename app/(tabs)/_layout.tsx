@@ -54,7 +54,6 @@ export default function TabsLayout() {
         name="adventure"
         options={{
           title: 'Royaume',
-          headerShown: false,
           tabBarIcon: ({ focused }) => <TabAdventureIcon focused={focused} />,
         }}
       />

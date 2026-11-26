@@ -118,7 +118,7 @@ function ZoneLabel({ x, y, text, accent }: { x: number; y: number; text: string;
       x={x}
       y={y}
       fill={accent}
-      fontSize="11"
+      fontSize="12"
       fontWeight="700"
       textAnchor="middle"
     >
