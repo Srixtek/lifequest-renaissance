@@ -13,6 +13,7 @@ import {
   type EnemyId,
 } from '../../data/content/kingdom';
 import * as kingdomRepo from '../../data/db/repositories/kingdomRepo';
+import * as combatVictoryRepo from '../../data/db/repositories/combatVictoryRepo';
 import * as profileRepo from '../../data/db/repositories/profileRepo';
 import * as rpgRepo from '../../data/db/repositories/rpgRepo';
 import {
@@ -209,6 +210,9 @@ export async function performCombatAction(
     }
 
     await kingdomRepo.saveCombatState(tx, next);
+    if (updated.outcome === 'victory' || updated.outcome === 'defeat') {
+      await combatVictoryRepo.logCombatOutcome(tx, stored.enemyId, updated.outcome, now);
+    }
     const last = updated.log[updated.log.length - 1] ?? '';
     if (updated.outcome === 'victory' && !stored.firstWinRewarded) {
       result = { ok: true, message: `${last} Bannière du bastion ajoutée à l'inventaire.` };

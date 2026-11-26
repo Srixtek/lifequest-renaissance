@@ -190,6 +190,16 @@ export async function closeAttempt(
   return Number(r.changes) > 0;
 }
 
+export async function listAttemptsSince(db: Conn, sinceIso: string): Promise<AdaptiveChallengeAttempt[]> {
+  const rows = await db.getAllAsync<Record<string, unknown>>(
+    `SELECT * FROM adaptive_challenge_attempts
+     WHERE COALESCE(ended_at, started_at) >= ? AND outcome != 'running'
+     ORDER BY COALESCE(ended_at, started_at)`,
+    sinceIso,
+  );
+  return rows.map(mapAttempt);
+}
+
 export async function listRecentAttempts(
   db: Conn,
   category: AdaptiveHabitCategory,
