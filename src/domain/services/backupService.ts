@@ -23,6 +23,9 @@ const TABLES = [
   'daily_reward_days',
   'daily_reward_goals',
   'challenge_sessions',
+  'adaptive_challenge_state',
+  'adaptive_challenge_attempts',
+  'adaptive_challenge_records',
 ] as const;
 
 export interface BackupPreview {

@@ -35,6 +35,7 @@ import {
 import { HELP_LINES, HEALTH_GUARDRAIL } from '@/src/data/content/helpLines';
 import { useRouter } from 'expo-router';
 import { challengeTypeForTemplate } from '@/src/domain/models/challengeSession';
+import { publicGoalTitle } from '@/src/domain/content/goalDisplay';
 
 const STATUS_FR: Record<TrackingStatus, string> = {
   unknown: 'Non renseigné',
@@ -383,11 +384,12 @@ export default function GoalsScreen() {
               ? completionRatio(status, g.kind, tr.value, ver.target)
               : undefined;
           const challengeType = challengeTypeForTemplate(g.templateId);
+          const displayTitle = publicGoalTitle(g);
 
           return (
             <QuestCard
               key={g.id}
-              title={g.title}
+              title={displayTitle}
               category={tpl?.category}
               status={status}
               statusLabel={statusLabel}
@@ -396,7 +398,15 @@ export default function GoalsScreen() {
               progress={progress}
             >
 
-              {challengeType ? (
+              {g.templateId === 'vape_sessions' ? (
+                <Button
+                  label="Mes défis"
+                  variant="secondary"
+                  onPress={() => router.push('/tools/vape-adaptive')}
+                  disabled={actionBusy}
+                />
+              ) : null}
+              {challengeType && g.templateId !== 'vape_sessions' ? (
                 <Button
                   label="Ouvrir le défi chronométré"
                   variant="secondary"

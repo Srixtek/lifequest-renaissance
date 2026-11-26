@@ -49,6 +49,12 @@ describe('resolveHabitPlan — alcohol & regulation', () => {
     expect(p.sensitive).toBe(true);
     expect(p.defaultTarget).toBeNull();
   });
+
+  test('regulation limit uses explicit config title', () => {
+    const p = resolveHabitPlan('C', 'reduce', 2, null);
+    expect(p.title).toMatch(/Masturbation \/ sexualité personnelle/);
+    expect(p.kind).toBe('reduce');
+  });
 });
 
 describe('resolveHabitPlan — family weekly', () => {

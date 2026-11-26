@@ -11,6 +11,7 @@ import {
   intentionRequiresNumericTarget,
   intentionRequiresWeeklyCount,
   resolveHabitPlan,
+  CONFIG_CATEGORY_LABELS,
   type HabitCategory,
   type HabitIntentionChoice,
 } from '@/src/domain/content/habitIntentions';
@@ -138,7 +139,9 @@ export function HabitSetupFlow({
 
       {step === 'intention' && category ? (
         <View>
-          <Body>Intention pour {CATEGORY_LABELS[category]}</Body>
+          <Body>
+            Intention pour {category === 'C' ? CONFIG_CATEGORY_LABELS[category] : CATEGORY_LABELS[category]}
+          </Body>
           <View style={styles.chips}>
             {INTENTION_OPTIONS[category].map((opt) => (
               <Chip
@@ -154,6 +157,16 @@ export function HabitSetupFlow({
                 }}
               />
             ))}
+            {category === 'C' ? (
+              <Chip
+                label="Ne pas suivre"
+                selected={false}
+                onPress={() => {
+                  onFeedback('Aucun objectif sensible créé — tu pourras revenir quand tu veux.');
+                  reset();
+                }}
+              />
+            ) : null}
           </View>
           <Button label="Retour" variant="ghost" onPress={() => setStep('category')} disabled={flowDisabled} />
         </View>

@@ -20,7 +20,7 @@ export default function OnboardingScreen() {
   const [pseudo, setPseudo] = useState('');
   const [classId, setClassId] = useState<ClassId>('rodeur');
   const [tone, setTone] = useState<'fantasy' | 'sobre'>('fantasy');
-  const [selected, setSelected] = useState<string[]>(['vape_sessions', 'breathing5']);
+  const [selected, setSelected] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -94,7 +94,12 @@ export default function OnboardingScreen() {
         <Body muted>Tu pourras en ajouter ensuite. Rien n'est coché comme réussi par défaut.</Body>
         <View style={[styles.row, { marginTop: spacing.sm }]}>
           {GOAL_TEMPLATES.map((t) => (
-            <Chip key={t.id} label={t.title} selected={selected.includes(t.id)} onPress={() => toggle(t.id)} />
+            <Chip
+              key={t.id}
+              label={t.sensitive ? 'Régulation personnelle' : t.title}
+              selected={selected.includes(t.id)}
+              onPress={() => toggle(t.id)}
+            />
           ))}
         </View>
 

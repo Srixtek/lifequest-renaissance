@@ -44,7 +44,7 @@ export const GOAL_TEMPLATES: GoalTemplate[] = [
   },
   {
     id: 'freq_regulation',
-    title: 'Réguler une fréquence (perso.)',
+    title: 'Masturbation / sexualité personnelle',
     kind: 'reduce',
     unit: 'fois',
     defaultTier: 'normal',

@@ -3,10 +3,21 @@ import type { GoalTemplate } from '../../data/content/goalTemplates';
 
 export type HabitCategory = GoalTemplate['category'];
 
+/** Libellé public (listes, suivi). */
 const CATEGORY_LABELS: Record<HabitCategory, string> = {
   A: 'Vape',
   B: 'Alcool',
   C: 'Régulation personnelle',
+  D: 'Activité physique',
+  E: 'Temps sans écran',
+  F: 'Famille et proches',
+};
+
+/** Libellé explicite réservé à l'écran de configuration. */
+export const CONFIG_CATEGORY_LABELS: Record<HabitCategory, string> = {
+  A: 'Vape',
+  B: 'Alcool',
+  C: 'Masturbation / sexualité personnelle',
   D: 'Activité physique',
   E: 'Temps sans écran',
   F: 'Famille et proches',
@@ -33,10 +44,16 @@ const CONSUMPTION_OPTIONS: IntentionOption[] = [
   { id: 'measure', label: 'Mesurer', hint: 'Suivi neutre, sans récompense XP automatique' },
 ];
 
+const REGULATION_OPTIONS: IntentionOption[] = [
+  { id: 'measure', label: 'Mesurer', hint: 'Suivi neutre, sans récompense XP automatique' },
+  { id: 'reduce', label: 'Limiter', hint: 'Fixer un maximum par jour' },
+  { id: 'stop', label: 'Abstinence volontaire', hint: 'Viser une journée sans consommation déclarée' },
+];
+
 export const INTENTION_OPTIONS: Record<HabitCategory, IntentionOption[]> = {
   A: CONSUMPTION_OPTIONS,
   B: CONSUMPTION_OPTIONS,
-  C: CONSUMPTION_OPTIONS,
+  C: REGULATION_OPTIONS,
   D: [{ id: 'minutes', label: 'Minutes visées', hint: 'Cible quotidienne en minutes, puis saisie réelle' }],
   E: [{ id: 'minutes', label: 'Minutes visées', hint: 'Cible quotidienne en minutes, puis saisie réelle' }],
   F: [{ id: 'weekly_calls', label: 'Appels réguliers', hint: 'Objectif hebdomadaire, confirmation jour par jour' }],
@@ -86,7 +103,7 @@ export function resolveHabitPlan(
   weeklyTarget: number | null,
 ): ResolvedHabitPlan {
   const templateId = TEMPLATE_ID[category];
-  const catLabel = CATEGORY_LABELS[category];
+  const catLabel = CONFIG_CATEGORY_LABELS[category];
 
   if (intention === 'weekly_calls') {
     const w = weeklyTarget ?? DEFAULT_WEEKLY_CALL_TARGET;

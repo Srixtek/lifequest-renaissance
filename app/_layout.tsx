@@ -78,6 +78,15 @@ export default function RootLayout() {
           }}
         />
         <Stack.Screen
+          name="tools/vape-adaptive"
+          options={{
+            headerShown: true,
+            title: 'Vape — Mes défis',
+            headerStyle: { backgroundColor: colors.bgElevated },
+            headerTintColor: colors.ink,
+          }}
+        />
+        <Stack.Screen
           name="journal/index"
           options={{
             headerShown: true,
