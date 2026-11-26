@@ -13,7 +13,6 @@ import {
   startCombat,
 } from '../domain/services/kingdomService';
 import * as rpgRepo from '../data/db/repositories/rpgRepo';
-import { migrate } from '../data/db/client';
 import { nodeSqliteAvailable, openNodeSqliteDb, type TestDb } from './helpers/nodeSqliteDb';
 
 const HAS_SQLITE = nodeSqliteAvailable();
@@ -90,46 +89,72 @@ suite('006B-R — fiabilité combat + backups', () => {
     }
   });
 
-  test('backup 008→009 : combat en cours, power, cooldown, forge, or', async () => {
-    await t.db.runAsync(`DELETE FROM schema_migrations WHERE version >= 9`);
-    await t.db.runAsync(`DROP TABLE kingdom_combat`);
-    await t.db.execAsync(`
-      CREATE TABLE kingdom_combat (
-        id INTEGER PRIMARY KEY CHECK (id = 1),
-        active INTEGER NOT NULL DEFAULT 1,
-        hero_hp INTEGER NOT NULL DEFAULT 20,
-        hero_hp_max INTEGER NOT NULL DEFAULT 28,
-        enemy_hp INTEGER NOT NULL DEFAULT 10,
-        enemy_hp_max INTEGER NOT NULL DEFAULT 24,
-        turn_number INTEGER NOT NULL DEFAULT 2,
-        enemy_intent TEXT NOT NULL DEFAULT 'power',
-        hero_guarding INTEGER NOT NULL DEFAULT 0,
-        skill_cooldown INTEGER NOT NULL DEFAULT 2,
-        outcome TEXT,
-        log_json TEXT NOT NULL DEFAULT '[]',
-        first_win_rewarded INTEGER NOT NULL DEFAULT 0,
-        updated_at TEXT NOT NULL
-      );
-      INSERT INTO kingdom_combat VALUES (1,1,15,28,12,25,3,'power',0,2,NULL,'[]',0,'2020-01-01');
-    `);
-    await rpgRepo.addGold(t.db, 25, 'test', 'bak-fixture-gold');
-    await t.db.runAsync(`INSERT OR REPLACE INTO kingdom_buildings (building_id, level, updated_at) VALUES ('forge', 2, '2020-01-01')`);
-    await migrate(t.db);
-    const view = await getKingdomView(t.db);
+  test('backup 008→009 : importBackupPayload sur base 009, power, cooldown, forge, or', async () => {
+    const maxVer = await t.db.getFirstAsync<{ v: number }>(
+      'SELECT COALESCE(MAX(version),0) AS v FROM schema_migrations',
+    );
+    expect(Number(maxVer?.v)).toBeGreaterThanOrEqual(9);
+
+    const combat008 = {
+      id: 1,
+      active: 1,
+      hero_hp: 15,
+      hero_hp_max: 28,
+      enemy_hp: 12,
+      enemy_hp_max: 25,
+      turn_number: 3,
+      enemy_intent: 'power',
+      hero_guarding: 0,
+      skill_cooldown: 2,
+      outcome: null,
+      log_json: '[]',
+      first_win_rewarded: 0,
+      updated_at: '2020-01-01T00:00:00.000Z',
+    };
+    const { manifest, data } = await exportBackupPayload(t.db, '0.2.0-preview.6');
+    data.kingdom_combat = [combat008];
+    data.kingdom_buildings = [{ building_id: 'forge', level: 2, updated_at: '2020-01-01' }];
+    data.wallet_ledger = [
+      ...(data.wallet_ledger ?? []),
+      {
+        id: 'bak-fixture-gold',
+        resource: 'gold',
+        amount: 25,
+        reason: 'test',
+        idempotency_key: 'bak-fixture-gold',
+        created_at: '2020-01-01',
+      },
+    ];
+    data.schema_migrations = (data.schema_migrations ?? []).filter((r: { version: number }) => r.version <= 8);
+    if (!data.schema_migrations.some((r: { version: number }) => r.version === 8)) {
+      data.schema_migrations.push({ version: 8, applied_at: '2020-01-01' });
+    }
+
+    let target = await openNodeSqliteDb();
+    const targetMax = await target.db.getFirstAsync<{ v: number }>(
+      'SELECT COALESCE(MAX(version),0) AS v FROM schema_migrations',
+    );
+    expect(Number(targetMax?.v)).toBeGreaterThanOrEqual(9);
+
+    await importBackupPayload(target.db, manifest, data);
+    const view = await getKingdomView(target.db);
     expect(view.combat.enemyIntent).toBe('heavy');
     expect(view.combat.concentration).toBe(0);
+    expect(view.combat.enemyIntentIndex).toBe(0);
+    expect(view.combat.enemyId).toBe('thorn_guardian');
     expect(view.combat.heroHp).toBe(15);
     expect(view.combat.active).toBe(true);
     expect(view.forge.level).toBe(2);
-    const gold = await t.db.getFirstAsync<{ s: number }>(
+    const gold = await target.db.getFirstAsync<{ s: number }>(
       'SELECT COALESCE(SUM(amount),0) AS s FROM wallet_ledger WHERE resource = ?',
       'gold',
     );
     expect(Number(gold?.s)).toBe(25);
-    await performCombatAction(t.db, 'defend', view.combat.turnNumber, view.combat.updatedAt);
-    const mid = await getKingdomView(t.db);
+    await performCombatAction(target.db, 'defend', view.combat.turnNumber, view.combat.updatedAt);
+    const mid = await getKingdomView(target.db);
     expect(mid.combat.turnNumber).toBe(4);
     expect(mid.combat.enemyIntent).toBeTruthy();
+    target.close();
   });
 
   test('backup export/import 009 : roundtrip avec combat actif', async () => {

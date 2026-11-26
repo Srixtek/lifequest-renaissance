@@ -118,6 +118,30 @@ export async function exportBackup(db: Db, appVersion = '0.1.0'): Promise<{ uri:
   };
 }
 
+/** Lignes kingdom_combat exportées en 008 (intent « power », colonnes v2 absentes). */
+function normalizeKingdomCombatImportRow(row: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...row };
+  const intent = String(out.enemy_intent ?? 'normal');
+  if (intent === 'power') {
+    out.enemy_intent = 'heavy';
+  } else if (intent !== 'normal' && intent !== 'heavy' && intent !== 'brace') {
+    out.enemy_intent = 'normal';
+  }
+  if (out.enemy_id === undefined || out.enemy_id === null) {
+    out.enemy_id = 'thorn_guardian';
+  }
+  if (out.enemy_intent_index === undefined || out.enemy_intent_index === null) {
+    out.enemy_intent_index = 0;
+  }
+  if (out.concentration === undefined || out.concentration === null) {
+    const cd = Number(out.skill_cooldown ?? 0);
+    if (cd >= 2) out.concentration = 0;
+    else if (cd === 1) out.concentration = 1;
+    else out.concentration = 1;
+  }
+  return out;
+}
+
 export async function previewBackup(uri: string): Promise<BackupPreview> {
   const base64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
   const zip = await JSZip.loadAsync(base64, { base64: true });
@@ -159,7 +183,8 @@ export async function importBackupPayload(
     for (const t of TABLES) {
       if (t === 'schema_migrations') continue;
       const rows = data[t] ?? [];
-      for (const row of rows) {
+      for (const raw of rows) {
+        const row = t === 'kingdom_combat' ? normalizeKingdomCombatImportRow(raw) : raw;
         const keys = Object.keys(row);
         if (!keys.length) continue;
         const placeholders = keys.map(() => '?').join(',');
