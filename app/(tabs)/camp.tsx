@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Screen, SecondaryLink } from '@/src/design-system/ui';
+import { Body, Screen, SecondaryLink } from '@/src/design-system/ui';
+import { CollapsibleSection } from '@/src/design-system/CollapsibleSection';
 import { colors, spacing, typography } from '@/src/design-system/theme';
 import { ForestScene } from '@/src/design-system/ForestScene';
 import { FantasyPanel } from '@/src/design-system/FantasyPanel';
@@ -16,12 +17,10 @@ import { useAppStore } from '@/src/state/appStore';
 import { XP_PER_LEVEL } from '@/src/domain/rules/xp';
 import type { GoalDefinition, TrackingStatus } from '@/src/domain/models/types';
 import { publicGoalTitle } from '@/src/domain/content/goalDisplay';
-import { challengeTypeForTemplate } from '@/src/domain/models/challengeSession';
 import { getDb } from '@/src/data/db/client';
-import {
-  delayMinutesForTier,
-  vapeChallengeDef,
-} from '@/src/domain/content/vapeChallengeDefs';
+import { upgradeCamp } from '@/src/domain/services/adventureService';
+import { buildCampNextChallenge } from '@/src/domain/services/campNextChallenge';
+import { delayMinutesForTier } from '@/src/domain/content/vapeChallengeDefs';
 
 function todayStatusLabel(
   goal: GoalDefinition,
@@ -49,10 +48,8 @@ export default function CampScreen() {
   const todayTracking = useAppStore((s) => s.todayTracking);
   const refresh = useAppStore((s) => s.refresh);
   const [vapeDelayMin, setVapeDelayMin] = useState<number | null>(null);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
+  const [vapeRunning, setVapeRunning] = useState(false);
+  const [campMsg, setCampMsg] = useState<string | null>(null);
 
   const activeGoals = useMemo(
     () => goals.filter((g) => g.status === 'active'),
@@ -64,91 +61,51 @@ export default function CampScreen() {
     [activeGoals],
   );
 
-  useEffect(() => {
+  const reloadVapeHint = useCallback(async () => {
     if (!vapeGoal) {
+      setVapeDelayMin(null);
+      setVapeRunning(false);
+      return;
+    }
+    const { getVapeAdaptiveDashboard } = await import('@/src/domain/services/adaptiveChallengeService');
+    const db = await getDb();
+    const dash = await getVapeAdaptiveDashboard(db);
+    if (dash.running) {
+      setVapeRunning(true);
       setVapeDelayMin(null);
       return;
     }
-    let cancelled = false;
-    void (async () => {
-      const { getVapeAdaptiveDashboard } = await import('@/src/domain/services/adaptiveChallengeService');
-      const db = await getDb();
-      const dash = await getVapeAdaptiveDashboard(db);
-      if (cancelled) return;
-      if (dash.running) {
-        setVapeDelayMin(null);
-        return;
-      }
-      setVapeDelayMin(delayMinutesForTier(dash.state.tierIndex));
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [vapeGoal?.id, goals]);
+    setVapeRunning(false);
+    setVapeDelayMin(delayMinutesForTier(dash.state.tierIndex));
+  }, [vapeGoal?.id]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void refresh();
+      void reloadVapeHint();
+    }, [refresh, reloadVapeHint]),
+  );
+
+  const nextChallengeModel = useMemo(
+    () =>
+      buildCampNextChallenge({
+        activeGoals,
+        todayTracking,
+        vapeDelayMin,
+        vapeRunning,
+      }),
+    [activeGoals, todayTracking, vapeDelayMin, vapeRunning],
+  );
 
   const nextChallenge = useMemo(() => {
-    if (vapeGoal && vapeDelayMin != null) {
-      const def = vapeChallengeDef('delay_craving');
-      return {
-        title: def.title,
-        subtitle: publicGoalTitle(vapeGoal),
-        targetLine: `Cible : tenir ${vapeDelayMin} min avant de vapoter`,
-        cta: 'Commencer',
-        onPress: () => router.push('/tools/vape-adaptive'),
-      };
-    }
-    const unstated = activeGoals.find((g) => {
-      if (g.templateId === 'vape_sessions') return false;
-      const tr = todayTracking[g.id];
-      const status = (tr?.status ?? 'unknown') as TrackingStatus;
-      return status === 'unknown';
-    });
-    if (unstated) {
-      const challengeType = challengeTypeForTemplate(unstated.templateId);
-      const displayTitle = publicGoalTitle(unstated);
-      if (challengeType) {
-        return {
-          title: `Défi : ${displayTitle}`,
-          subtitle: 'Chronomètre recommandé pour aujourd\'hui',
-          targetLine: undefined,
-          cta: 'Commencer',
-          onPress: () => router.push(`/tools/challenges?type=${challengeType}`),
-        };
-      }
-      return {
-        title: displayTitle,
-        subtitle: 'Ton suivi du jour n\'est pas encore renseigné',
-        targetLine: undefined,
-        cta: 'Renseigner',
-        onPress: () => router.push('/(tabs)/goals'),
-      };
-    }
-    if (activeGoals.length === 0) {
-      return {
-        title: 'Aucune habitude active',
-        subtitle: 'Choisis une première habitude pour lancer l\'aventure',
-        targetLine: undefined,
-        cta: 'Ajouter une habitude',
-        onPress: () => router.push('/(tabs)/goals'),
-        empty: true,
-      };
-    }
-    const doneCount = activeGoals.filter((g) => {
-      const tr = todayTracking[g.id];
-      const s = (tr?.status ?? 'unknown') as TrackingStatus;
-      return s === 'success' || s === 'partial';
-    }).length;
-    return {
-      title: doneCount === activeGoals.length ? 'Journée bien avancée' : 'Tout est à jour',
-      subtitle:
-        doneCount === activeGoals.length
-          ? 'Explore une quête ou prépare demain depuis Habitudes'
-          : 'Retrouve le détail de tes habitudes si besoin',
-      targetLine: `${doneCount}/${activeGoals.length} habitudes renseignées aujourd'hui`,
-      cta: 'Voir mes habitudes',
-      onPress: () => router.push('/(tabs)/goals'),
+    const { route, ...rest } = nextChallengeModel;
+    const onPress = () => {
+      if (route.kind === 'vape-adaptive') router.push('/tools/vape-adaptive');
+      else if (route.kind === 'challenges') router.push(`/tools/challenges?type=${route.challengeType}`);
+      else router.push('/(tabs)/goals');
     };
-  }, [activeGoals, todayTracking, vapeGoal, vapeDelayMin, router]);
+    return { ...rest, cta: rest.cta, onPress };
+  }, [nextChallengeModel, router]);
 
   const className = CLASSES.find((c) => c.id === profile?.classId)?.name ?? 'Voyageur';
   const totalXp = character?.totalXp ?? 0;
@@ -243,6 +200,29 @@ export default function CampScreen() {
             ) : null}
           </View>
         </FantasyPanel>
+
+        <CollapsibleSection title="Autres actions" hint="Envie, camp, chronomètres…">
+          <View style={styles.quickRow}>
+            <SecondaryLink label="Gérer une envie" onPress={() => router.push('/tools/urge')} />
+            <SecondaryLink label="Défis chronométrés" onPress={() => router.push('/tools/challenges')} />
+          </View>
+          <View style={[styles.quickRow, { marginTop: spacing.sm }]}>
+            <SecondaryLink
+              label="Améliorer le camp"
+              onPress={async () => {
+                const db = await getDb();
+                const r = await upgradeCamp(db);
+                setCampMsg(r.message);
+                await refresh();
+              }}
+            />
+          </View>
+          {campMsg ? (
+            <View style={{ marginTop: spacing.sm }}>
+              <Body muted>{campMsg}</Body>
+            </View>
+          ) : null}
+        </CollapsibleSection>
       </ScrollView>
     </Screen>
   );
