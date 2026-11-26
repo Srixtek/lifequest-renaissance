@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { ScrollView, View, Text, StyleSheet } from 'react-native';
 import { useFocusEffect } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Body, Button, Chip, Screen, Title } from '@/src/design-system/ui';
 import { FantasyPanel } from '@/src/design-system/FantasyPanel';
 import { QuestBoardCard } from '@/src/design-system/QuestBoardCard';
@@ -33,6 +34,7 @@ import { MIST_WOLF_ID, THORN_GUARDIAN_ID, type EnemyId } from '@/src/data/conten
 import { useAppStore } from '@/src/state/appStore';
 
 export default function AdventureScreen() {
+  const insets = useSafeAreaInsets();
   const refresh = useAppStore((s) => s.refresh);
   const [view, setView] = useState<Awaited<ReturnType<typeof getAdventureView>> | null>(null);
   const [kingdom, setKingdom] = useState<Awaited<ReturnType<typeof getKingdomView>> | null>(null);
@@ -113,7 +115,6 @@ export default function AdventureScreen() {
       }
       return;
     }
-    if (zone === 'forest') setKingdomMsg("La forêt recèle encore d'autres menaces… prochainement.");
     if (zone === 'camp') setKingdomMsg('Le camp tient bon. Les routes habituelles restent intactes.');
   };
 
@@ -153,7 +154,12 @@ export default function AdventureScreen() {
 
   return (
     <Screen>
-      <ScrollView contentContainerStyle={{ paddingBottom: spacing.xxl, paddingTop: spacing.sm }}>
+      <ScrollView
+        contentContainerStyle={{
+          paddingBottom: insets.bottom + spacing.xxl,
+          paddingTop: Math.max(insets.top, spacing.sm),
+        }}
+      >
         <Title>Royaume</Title>
         <Body muted>Le bastion d&apos;Eloria — forge, combat et quêtes du carnet.</Body>
         <View style={styles.tabs}>

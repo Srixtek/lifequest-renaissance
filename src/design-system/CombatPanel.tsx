@@ -9,6 +9,7 @@ import type { ClassId } from '../domain/models/types';
 import { Button, Body } from './ui';
 import { colors, spacing, typography } from './theme';
 import { FantasyPanel } from './FantasyPanel';
+import { pixelDim } from './pixelSprite';
 import { useReduceMotion } from './useReduceMotion';
 
 type Props = {
@@ -79,7 +80,7 @@ export function CombatPanel({
     <FantasyPanel>
       <View style={[styles.stage, flash === 'hit' && !reduceMotion && styles.flashHit, flash === 'defend' && !reduceMotion && styles.flashDefend]}>
         <View style={styles.floorRow} pointerEvents="none">
-          {Array.from({ length: 12 }).map((_, i) => (
+          {Array.from({ length: 10 }).map((_, i) => (
             <Image
               key={`floor-${i}`}
               source={require('../../assets/kingdom/kenney/terrain_path.png')}
@@ -87,7 +88,10 @@ export function CombatPanel({
             />
           ))}
         </View>
-        <Image source={require('../../assets/kingdom/kenney/combat_backdrop.png')} style={styles.backdrop} resizeMode="cover" />
+        <Image
+          source={require('../../assets/kingdom/kenney/combat_backdrop.png')}
+          style={styles.backdrop}
+        />
         <View style={styles.fighters}>
           <FighterSprite source={heroSprite(classId)} label={CLASS_LABELS[classId]} side="left" />
           <Text style={styles.vs}>vs</Text>
@@ -104,11 +108,9 @@ export function CombatPanel({
         <ConcentrationMeter value={combat.concentration} max={CONCENTRATION_MAX} />
       </View>
       <View style={[styles.intentBadge, { borderColor: intent.tint }]}>
-        <Text style={[styles.intentText, { color: intent.tint }]}>{intent.label}</Text>
-      </View>
-      <View style={styles.bars}>
-        <HpBar label="Héros" current={combat.heroHp} max={combat.heroHpMax} tint={colors.emerald} />
-        <HpBar label="Ennemi" current={combat.enemyHp} max={combat.enemyHpMax} tint={colors.warn} />
+        <Text style={[styles.intentText, { color: intent.tint }]} numberOfLines={2}>
+          {intent.label}
+        </Text>
       </View>
       <View style={styles.turnLine}>
         <Body muted>Tour {combat.turnNumber} · compétence : {SKILL_CONCENTRATION_COST} concentration</Body>
@@ -160,10 +162,9 @@ function FighterSprite({
   label: string;
   side: 'left' | 'right';
 }) {
-  const scale = 4.5;
-  const size = Math.round(16 * 3 * (scale / 3));
+  const size = pixelDim(3.6);
   return (
-    <View style={[styles.fighter, side === 'right' && { alignItems: 'flex-end' }]}>
+    <View style={[styles.fighter, side === 'right' && styles.fighterEnd]}>
       <Image source={source} style={{ width: size, height: size }} />
       <Text style={styles.fighterLabel} numberOfLines={2}>
         {label}
@@ -229,7 +230,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     overflow: 'hidden',
     marginBottom: spacing.sm,
-    minHeight: 172,
+    minHeight: pixelDim(3.6) + spacing.xl + 28,
     borderWidth: 1,
     borderColor: colors.line,
   },
@@ -242,8 +243,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingBottom: 2,
   },
-  floorTile: { width: 28, height: 28, opacity: 0.55, resizeMode: 'stretch' as const },
-  backdrop: { ...StyleSheet.absoluteFill, opacity: 0.22 },
+  floorTile: { width: pixelDim(0.55), height: pixelDim(0.55), opacity: 0.55 },
+  backdrop: {
+    position: 'absolute',
+    top: spacing.sm,
+    left: '12%',
+    width: pixelDim(5.5),
+    height: pixelDim(2.75),
+    opacity: 0.22,
+  },
   telegraphRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -260,14 +268,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     justifyContent: 'space-between',
-    paddingHorizontal: spacing.md,
-    paddingTop: spacing.md,
-    paddingBottom: spacing.lg,
+    paddingHorizontal: spacing.sm,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.lg + 6,
+    gap: spacing.xs,
   },
-  fighter: { alignItems: 'center', gap: 4, flex: 1 },
+  fighter: { alignItems: 'center', gap: 4, flex: 1, minWidth: 0, maxWidth: '40%' },
+  fighterEnd: { alignItems: 'center' },
   fighterLabel: { ...typography.caption, color: colors.muted, fontSize: 10, textAlign: 'center' },
-  vs: { ...typography.caption, color: colors.line, marginHorizontal: spacing.xs, marginBottom: 24 },
-  sceneHp: { position: 'absolute', width: '38%' },
+  vs: { ...typography.caption, color: colors.line, marginBottom: pixelDim(0.8), flexShrink: 0 },
+  sceneHp: { position: 'absolute', width: '36%', maxWidth: 120 },
   heroHp: { left: spacing.sm, bottom: spacing.sm },
   enemyHp: { right: spacing.sm, bottom: spacing.sm },
   hpTrackThin: { height: 5, borderRadius: 3, backgroundColor: colors.line, overflow: 'hidden' },
@@ -285,8 +295,7 @@ const styles = StyleSheet.create({
   concDots: { flexDirection: 'row', gap: 6 },
   concDot: { width: 10, height: 10, borderRadius: 5, borderWidth: 1, borderColor: colors.line },
   concDotOn: { backgroundColor: colors.gold, borderColor: colors.goldBright },
-  title: { ...typography.subtitle, color: colors.gold, marginBottom: spacing.xs, flex: 1, flexShrink: 1, minWidth: 120 },
-  bars: { gap: spacing.sm, marginBottom: spacing.sm },
+  title: { ...typography.subtitle, color: colors.gold, marginBottom: spacing.xs, flex: 1, flexShrink: 1, minWidth: 0 },
   hpWrap: { marginBottom: 4 },
   hpLabel: { ...typography.caption, color: colors.muted, marginBottom: 2 },
   hpTrack: {
