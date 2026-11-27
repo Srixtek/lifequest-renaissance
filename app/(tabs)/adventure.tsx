@@ -35,7 +35,6 @@ import {
 import { RenewableQuestCard } from '@/src/design-system/RenewableQuestCard';
 import type { RenewableQuestCategory } from '@/src/data/content/renewableQuestTemplates';
 import { CATEGORY_LABELS } from '@/src/data/content/renewableQuestTemplates';
-import { chooseAdventure, equipLantern, getAdventureView } from '@/src/domain/services/adventureService';
 import {
   confirmForgeUpgrade,
   dismissCombat,
@@ -52,11 +51,9 @@ export default function AdventureScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ tab?: string; instanceId?: string; openCombat?: string; openForge?: string }>();
   const refresh = useAppStore((s) => s.refresh);
-  const [view, setView] = useState<Awaited<ReturnType<typeof getAdventureView>> | null>(null);
   const [kingdom, setKingdom] = useState<Awaited<ReturnType<typeof getKingdomView>> | null>(null);
-  const [msg, setMsg] = useState<string | null>(null);
   const [kingdomMsg, setKingdomMsg] = useState<string | null>(null);
-  const [tab, setTab] = useState<'royaume' | 'quests' | 'trail'>('royaume');
+  const [tab, setTab] = useState<'royaume' | 'quests'>('royaume');
   const [board, setBoard] = useState<QuestBoard | null>(null);
   const [renewableBoard, setRenewableBoard] = useState<RenewableQuestBoard | null>(null);
   const [questCategory, setQuestCategory] = useState<RenewableQuestCategory | 'toutes'>('toutes');
@@ -74,7 +71,6 @@ export default function AdventureScreen() {
 
   const load = useCallback(async () => {
     const db = await getDb();
-    setView(await getAdventureView(db));
     setBoard(await getQuestBoard(db));
     setRenewableBoard(await getRenewableQuestBoard(db));
     setKingdom(await getKingdomView(db));
@@ -150,7 +146,7 @@ export default function AdventureScreen() {
   useFocusEffect(
     useCallback(() => {
       const tabParam = params.tab;
-      if (tabParam === 'quests' || tabParam === 'royaume' || tabParam === 'trail') {
+      if (tabParam === 'quests' || tabParam === 'royaume') {
         setTab(tabParam);
       }
       if (params.openCombat === '1') {
@@ -170,7 +166,7 @@ export default function AdventureScreen() {
     }, [params.tab, params.instanceId, params.openCombat, params.openForge]),
   );
 
-  if (!view || !board || !kingdom || !renewableBoard) {
+  if (!board || !kingdom || !renewableBoard) {
     return (
       <Screen>
         <Body>Chargement…</Body>
@@ -261,11 +257,6 @@ export default function AdventureScreen() {
         <View style={styles.tabs}>
           <Chip label="Bastion" selected={tab === 'royaume'} onPress={() => setTab('royaume')} />
           <Chip label="Quêtes" selected={tab === 'quests'} onPress={() => setTab('quests')} />
-          <Chip
-            label="Ancien sentier"
-            selected={tab === 'trail'}
-            onPress={() => setTab('trail')}
-          />
         </View>
         {tab === 'royaume' ? (
           <>
@@ -440,7 +431,7 @@ export default function AdventureScreen() {
               <>
                 <Text style={styles.section}>Légendes (quêtes uniques)</Text>
                 {legendInProgress.length === 0 && byState('available').length === 0 ? (
-                  <Body muted>Les quatre quêtes légendaires sont terminées ou en attente.</Body>
+                  <Body muted>Les quêtes légendaires sont terminées ou en attente.</Body>
                 ) : (
                   <>
                     {renderCards(legendInProgress)}
@@ -452,48 +443,11 @@ export default function AdventureScreen() {
             ) : null}
           </>
         ) : null}
-        {tab === 'trail' ? (
-          <>
-            <Text style={styles.trailTitle}>{view.node.title}</Text>
-            <Body>{view.node.description}</Body>
-            {view.locked ? (
-              <Text style={styles.warn}>Zone voilée — équipe la lanterne pour y voir clair.</Text>
-            ) : null}
-            <View style={{ height: spacing.md }} />
-            <Button
-              label="Équiper la lanterne"
-              variant="ghost"
-              onPress={async () => {
-                const db = await getDb();
-                const r = await equipLantern(db);
-                setMsg(r.message);
-                await refresh();
-                await load();
-              }}
-            />
-            {view.node.choices.map((c) => (
-              <Button
-                key={c.id}
-                label={c.label}
-                onPress={async () => {
-                  const db = await getDb();
-                  const r = await chooseAdventure(db, c.id);
-                  setMsg(r.message);
-                  await refresh();
-                  await load();
-                }}
-              />
-            ))}
-            {msg ? <Body muted>{msg}</Body> : null}
-            <Body muted>Visité : {view.visited.join(' → ')}</Body>
-          </>
-        ) : null}
     </TabScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  warn: { color: colors.warn, marginTop: spacing.sm },
   tabs: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: spacing.sm, gap: 0 },
   section: { ...typography.label, color: colors.gold, marginTop: spacing.lg },
   sectionSecondary: { color: colors.muted, marginTop: spacing.md },
@@ -504,5 +458,4 @@ const styles = StyleSheet.create({
   forgeMeta: { ...typography.caption, color: colors.muted, marginBottom: spacing.sm, lineHeight: 18 },
   forgeActions: { gap: spacing.xs },
   forgeConfirm: { ...typography.caption, color: colors.ink, marginBottom: spacing.xs },
-  trailTitle: { ...typography.title, color: colors.ink, marginBottom: spacing.sm },
 });

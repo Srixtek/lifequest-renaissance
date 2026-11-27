@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { ScrollView, Text, StyleSheet } from 'react-native';
+import { Text, StyleSheet } from 'react-native';
 import * as Sharing from 'expo-sharing';
-import { Body, Button, Screen, Title } from '@/src/design-system/ui';
+import { Body, Button, TabScrollView } from '@/src/design-system/ui';
+import { CustomHabitForm } from '@/src/design-system/CustomHabitForm';
 import { colors, spacing } from '@/src/design-system/theme';
 import { HELP_LINES, HEALTH_GUARDRAIL } from '@/src/data/content/helpLines';
 import { getDb } from '@/src/data/db/client';
@@ -11,15 +12,21 @@ import { DAILY_XP_BUDGET, XP_RULE_VERSION } from '@/src/domain/rules/xp';
 
 export default function SettingsScreen() {
   const profile = useAppStore((s) => s.profile);
+  const refresh = useAppStore((s) => s.refresh);
   const [msg, setMsg] = useState<string | null>(null);
 
   return (
-    <Screen>
-      <ScrollView contentContainerStyle={{ paddingBottom: spacing.xxl }}>
-        <Title>Paramètres</Title>
+    <TabScrollView>
         <Body muted>
           {profile?.pseudo} · fuseau {profile?.timezone} · jour à partir de {profile?.dayStartHour}h
         </Body>
+
+        <Text style={styles.section}>Créer une habitude</Text>
+        <Body muted>
+          Une habitude à toi, rangée dans la catégorie de ton choix. Les modèles guidés restent dans l&apos;onglet
+          Habitudes.
+        </Body>
+        <CustomHabitForm onCreated={refresh} />
 
         <Text style={styles.section}>XP</Text>
         <Body>
@@ -62,8 +69,7 @@ export default function SettingsScreen() {
         ))}
         <Body muted>{HEALTH_GUARDRAIL}</Body>
         {msg ? <Text style={styles.msg}>{msg}</Text> : null}
-      </ScrollView>
-    </Screen>
+    </TabScrollView>
   );
 }
 

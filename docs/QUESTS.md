@@ -1,5 +1,7 @@
 # Quêtes et or (mission 004C-1)
 
+> V1-01 : « Au-delà de la brume » (`explore_grove`) est retirée (`retired: true`) : l'onglet Ancien sentier n'existe plus. Elle n'est plus proposée ni comptée dans les 3 emplacements ; une ancienne acceptation dont la preuve est déjà atteinte reste réclamable, une quête déjà réclamée reste dans l'historique. Aucune ligne n'est supprimée.
+
 ## Règles
 - 4 quêtes uniques (`src/data/content/quests.ts`), or fixe, pas de quête quotidienne répétable, pas d'XP ni d'éclats par quête.
 - Maximum 3 quêtes acceptées (non réclamées). Aucune acceptation automatique.

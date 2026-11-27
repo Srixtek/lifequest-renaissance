@@ -14,6 +14,12 @@ export interface QuestDef {
   proof: QuestProofKind;
   /** Nœud de carte à atteindre (proof === 'reach_node'). */
   targetNode?: string;
+  /**
+   * Quête mise hors service : plus jamais proposée ni comptée dans le carnet. Si elle était déjà
+   * réclamée, elle reste visible dans l'historique ; si elle était acceptée et déjà prête, elle reste
+   * réclamable (or légitimement gagné). Jamais supprimée de la base.
+   */
+  retired?: boolean;
 }
 
 export const MAX_ACCEPTED_QUESTS = 3;
@@ -53,8 +59,12 @@ export const QUESTS: QuestDef[] = [
     rewardGold: 20,
     proof: 'reach_node',
     targetNode: 'hidden_grove',
+    retired: true,
   },
 ];
+
+export const ACTIVE_QUESTS: QuestDef[] = QUESTS.filter((q) => !q.retired);
+export const RETIRED_QUEST_IDS: string[] = QUESTS.filter((q) => q.retired).map((q) => q.id);
 
 export const QUEST_BY_ID: Record<string, QuestDef> = Object.fromEntries(QUESTS.map((q) => [q.id, q]));
 
@@ -67,5 +77,5 @@ export const QUEST_HOW_TO: Record<string, string> = {
   time_tamed:
     'Accepter la quête, puis lance un défi chronométré (sport ou sans écran) depuis les outils du camp.',
   explore_grove:
-    'Accepter la quête, puis Royaume → Ancien sentier : progresse jusqu\'à la Clairière voilée.',
+    'Quête historique : l\'Ancien sentier n\'est plus accessible.',
 };

@@ -6,6 +6,15 @@ export type GoalKind =
   | 'duration'
   | 'quantity';
 
+export type HabitCategoryId =
+  | 'vape'
+  | 'alcool'
+  | 'sport'
+  | 'proches'
+  | 'personnel'
+  | 'sans_ecran'
+  | 'divers';
+
 export type GoalScheduleKind = 'daily' | 'weekly';
 
 export type TrackingStatus = 'unknown' | 'success' | 'partial' | 'miss' | 'paused';
@@ -35,6 +44,8 @@ export interface GoalDefinition {
   templateId: string | null;
   sensitive: boolean;
   followWithoutXp: boolean;
+  /** Catégorie persistée (migration 011). Absente/null : classement par modèle, sinon « divers ». */
+  categoryId?: HabitCategoryId | null;
   createdAt: string;
 }
 
