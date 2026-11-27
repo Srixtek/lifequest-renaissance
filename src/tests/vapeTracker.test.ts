@@ -582,7 +582,7 @@ suite('tracker vape — SQLite réel (node:sqlite)', () => {
       await migrate(t.db);
       expect(await snap()).toEqual(before);
       const applied = await t.db.getAllAsync<{ version: number }>(`SELECT version FROM schema_migrations ORDER BY version`);
-      expect(applied.map((r) => r.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]);
+      expect(applied.map((r) => r.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
       const names = await t.db.getAllAsync<{ name: string }>(
         `SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'vape_%' ORDER BY name`,
       );

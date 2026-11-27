@@ -48,10 +48,20 @@ const TABLES = [
   'sport_sessions',
   'sport_corrections',
   'sport_events',
+  'proches_contacts',
+  'proches_calls',
+  'proches_weekly_goals',
+  'proches_corrections',
+  'proches_events',
 ] as const;
 
 /** Ordre enfants → parents (FK) pour un vidage sans orphelins. */
 const WIPE_ORDER: readonly string[] = [
+  'proches_events',
+  'proches_corrections',
+  'proches_calls',
+  'proches_weekly_goals',
+  'proches_contacts',
   'sport_events',
   'sport_corrections',
   'sport_sessions',
