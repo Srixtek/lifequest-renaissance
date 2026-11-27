@@ -298,6 +298,30 @@ suite('008A-R patch final — verrous', () => {
     expect(renewableProofSatisfied(tmpl, p2, 'active')).toBe(false);
   });
 
+  test('respiration globale : une séance externe, deux quêtes, une seule récompense', async () => {
+    const past = new Date(Date.now() - 600_000).toISOString();
+    const inst1 = await seedOffer(t, 'rnw_breathe_3');
+    await acceptRenewableQuest(t.db, inst1);
+    const inst2 = await seedOffer(t, 'rnw_breathe_3');
+    await acceptRenewableQuest(t.db, inst2);
+    await t.db.runAsync(`UPDATE renewable_quest_instances SET accepted_at = ? WHERE id IN (?, ?)`, past, inst1, inst2);
+    const copeId = createId('cope');
+    await t.db.runAsync(
+      `INSERT INTO coping_sessions (id, kind, duration_sec, completed, meta_json, created_at) VALUES (?, 'breathing', 180, 1, '{}', ?)`,
+      copeId,
+      new Date().toISOString(),
+    );
+
+    const claim1 = await claimRenewableQuest(t.db, inst1);
+    expect(claim1.ok).toBe(true);
+    const row1 = await renewableQuestRepo.getInstance(t.db, inst1);
+    const meta1 = JSON.parse(row1!.progressJson ?? '{}');
+    expect(meta1.proofBreathingCopeSessionId).toBe(copeId);
+
+    const claim2 = await claimRenewableQuest(t.db, inst2);
+    expect(claim2.ok).toBe(false);
+  });
+
   test('arrêt partiel au-delà de la cible ne passe pas en ready', async () => {
     const inst = await seedOffer(t, 'rnw_breathe_3');
     await acceptRenewableQuest(t.db, inst);

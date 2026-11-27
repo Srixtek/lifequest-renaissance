@@ -94,6 +94,32 @@ function challengeSessionProofComplete(
   return false;
 }
 
+export async function pickFreeBreathingCopeSessionId(
+  db: Conn,
+  template: RenewableQuestTemplate,
+  acceptedAt: string,
+  excludeInstanceId?: string,
+): Promise<string | null> {
+  const target = template.targetDurationSec ?? 180;
+  const consumed = await consumedBreathingCopeSessionIds(db, excludeInstanceId);
+  const rows = await db.getAllAsync<{ id: string; created_at: string; duration_sec: number; meta_json: string | null }>(
+    `SELECT id, created_at, duration_sec, meta_json FROM coping_sessions
+     WHERE kind = 'breathing' AND completed = 1 AND created_at >= ?`,
+    acceptedAt,
+  );
+  const acceptedMs = Date.parse(acceptedAt);
+  for (const r of rows) {
+    if (consumed.has(r.id)) continue;
+    const meta = r.meta_json ? JSON.parse(r.meta_json) : {};
+    if (meta.shortcut) continue;
+    const startMs = Date.parse(r.created_at) - Math.max(0, Number(r.duration_sec) || 0) * 1000;
+    if (Number.isFinite(startMs) && startMs >= acceptedMs && Number(r.duration_sec) >= target) {
+      return r.id;
+    }
+  }
+  return null;
+}
+
 export async function pickFreeCombatVictoryId(
   db: Conn,
   template: RenewableQuestTemplate,

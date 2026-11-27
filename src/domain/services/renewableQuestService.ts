@@ -18,6 +18,7 @@ import { createId } from '../../utils/id';
 import {
   evaluateRenewableProof,
   parseProgressJson,
+  pickFreeBreathingCopeSessionId,
   pickFreeCombatVictoryId,
   renewableProofSatisfied,
   type InlineTimerProgress,
@@ -247,14 +248,21 @@ export async function refreshRenewableState(db: Db, instanceId: string, now = ne
     const progress = await evaluateRenewableProof(tx, template, row.acceptedAt, row.progressJson, row.challengeSessionId);
     if (!renewableProofSatisfied(template, progress, row.status)) return;
     let progressJson = row.progressJson;
+    const meta = parseProgressJson(row.progressJson);
     if (template.proof === 'combat_victory' && progress.current >= 1) {
-      const meta = parseProgressJson(row.progressJson);
       if (!meta.proofCombatVictoryId) {
         const pick = await pickFreeCombatVictoryId(tx, template, row.acceptedAt, instanceId);
-        if (pick) {
-          meta.proofCombatVictoryId = pick;
-          progressJson = JSON.stringify(meta);
-        }
+        if (!pick) return;
+        meta.proofCombatVictoryId = pick;
+        progressJson = JSON.stringify(meta);
+      }
+    }
+    if (template.proof === 'breathing_timer' && progress.current >= 1) {
+      if (!meta.proofBreathingCopeSessionId) {
+        const pick = await pickFreeBreathingCopeSessionId(tx, template, row.acceptedAt, instanceId);
+        if (!pick) return;
+        meta.proofBreathingCopeSessionId = pick;
+        progressJson = JSON.stringify(meta);
       }
     }
     await renewableQuestRepo.markReady(tx, instanceId, progressJson, now.toISOString());
@@ -538,6 +546,24 @@ export async function claimRenewableQuest(db: Db, instanceId: string, now = new 
           return;
         }
         meta.proofCombatVictoryId = pick;
+        progressJson = JSON.stringify(meta);
+        if (status === 'active') {
+          await renewableQuestRepo.markReady(tx, instanceId, progressJson, at);
+          status = 'ready';
+        } else if (status === 'ready') {
+          await renewableQuestRepo.updateProgress(tx, instanceId, progressJson, row.challengeSessionId, at);
+        }
+      }
+    }
+
+    if (template.proof === 'breathing_timer') {
+      if (!meta.proofBreathingCopeSessionId) {
+        const pick = await pickFreeBreathingCopeSessionId(tx, template, row.acceptedAt, instanceId);
+        if (!pick) {
+          result = { ok: false, message: 'Aucune séance de respiration éligible pour cette quête.' };
+          return;
+        }
+        meta.proofBreathingCopeSessionId = pick;
         progressJson = JSON.stringify(meta);
         if (status === 'active') {
           await renewableQuestRepo.markReady(tx, instanceId, progressJson, at);
