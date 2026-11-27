@@ -18,6 +18,7 @@ import {
 import {
   addCall,
   addContact,
+  addContactAndCall,
   archiveContact,
   cancelCall,
   editCall,
@@ -131,7 +132,7 @@ export function ProchesTracker() {
     const clock = formatClockInput(now, tz);
     setEditingId(null);
     setForm({
-      contactId: contacts.find((c) => c.status === 'active')?.id ?? '',
+      contactId: '',
       date: clock.date,
       time: clock.time,
       note: '',
@@ -176,25 +177,32 @@ export function ProchesTracker() {
         setMsg(ERROR_TEXT.invalid_time);
         return;
       }
-      let contactId = form.contactId;
-      if (!contactId && form.quickName.trim()) {
-        const n = parseContactName(form.quickName);
-        if (!n.ok) {
-          setMsg(n.error);
+      if (!editingId && !form.contactId && form.quickName.trim()) {
+        const calledAt = wallClockToInstant(form.date, form.time, tz);
+        if (!calledAt) {
+          setMsg(ERROR_TEXT.invalid_time);
           return;
         }
-        const added = await addContact(db, {
-          name: n.value,
+        const r = await addContactAndCall(db, {
+          name: form.quickName,
           relation: form.quickRelation || null,
+          calledAt,
+          note: form.note,
+          clientRequestId: requestId,
         });
-        if (!added.ok) {
-          setMsg(ERROR_TEXT[added.code] ?? 'Impossible d\'ajouter ce proche.');
+        if (!r.ok) {
+          setMsg(ERROR_TEXT[r.code] ?? (r.code === 'invalid_name' ? 'Indique un nom ou un surnom.' : 'Enregistrement impossible.'));
           return;
         }
-        contactId = added.contact.id;
+        setMsg(r.duplicate ? 'Cet appel était déjà enregistré (double clic ignoré).' : `Appel avec ${r.call.contactName} enregistré.`);
+        setRequestId(createId('preq'));
+        closeForm();
+        await reload();
+        return;
       }
+      const contactId = form.contactId;
       if (!contactId) {
-        setMsg('Choisis un proche ou crée-en un rapidement.');
+        setMsg(activeContacts.length === 0 ? 'Aucun proche : crée-en un via « création rapide » ou le répertoire.' : 'Choisis un proche dans la liste.');
         return;
       }
       if (editingId) {
@@ -316,7 +324,7 @@ export function ProchesTracker() {
   const goal = dash.weekTarget;
   const progress = goal != null && goal > 0 ? Math.min(1, dash.weekCallCount / goal) : 0;
   const activeContacts = contacts.filter((c) => c.status === 'active');
-  const shownCount = monthMap.get(shownDate) ?? 0;
+  const shownCount = entries.filter((e) => e.status === 'active').length;
   const delta =
     dash.previousWeekCallCount != null ? dash.weekCallCount - dash.previousWeekCallCount : null;
 

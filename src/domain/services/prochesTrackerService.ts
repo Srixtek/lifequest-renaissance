@@ -66,6 +66,78 @@ export type AddContactResult =
   | { ok: true; contact: ProchesContact }
   | { ok: false; code: 'invalid_name' };
 
+export interface QuickContactCallInput {
+  name: string;
+  relation?: ProchesRelation | null;
+  calledAt: Date;
+  note?: string | null;
+  clientRequestId?: string | null;
+}
+
+export type AddContactAndCallResult = AddCallResult | { ok: false; code: 'invalid_name' };
+
+/** Création rapide + appel dans une seule transaction (pas de contact orphelin si l'appel échoue). */
+export async function addContactAndCall(
+  db: Db,
+  input: QuickContactCallInput,
+  opts: ProchesOpts = {},
+): Promise<AddContactAndCallResult> {
+  const parsed = parseContactName(input.name);
+  if (!parsed.ok) return { ok: false, code: 'invalid_name' };
+  let result: AddContactAndCallResult = { ok: false, code: 'not_found' };
+  await db.withExclusiveTransactionAsync(async (tx) => {
+    const ctx = await resolveCtx(tx, opts);
+    const t = validTime(input.calledAt, ctx.now);
+    if (t !== 'ok') {
+      result = { ok: false, code: t };
+      return;
+    }
+    if (input.clientRequestId) {
+      const existing = await prochesRepo.getCallByRequestId(tx, input.clientRequestId);
+      if (existing) {
+        result = { ok: true, call: existing, duplicate: true };
+        return;
+      }
+    }
+    const contactId = createId('prc');
+    const at = ctx.now.toISOString();
+    await prochesRepo.insertContact(tx, {
+      id: contactId,
+      name: parsed.value,
+      relation: input.relation ?? null,
+      note: null,
+      createdAt: at,
+    });
+    await prochesRepo.insertEvent(tx, {
+      id: createId('pev'),
+      kind: 'contact_added',
+      contactId,
+      occurredAt: at,
+    });
+    const callId = createId('pcl');
+    const localDate = alcoholLogicalDate(input.calledAt, ctx.timeZone, ctx.dayStartHour);
+    await prochesRepo.insertCall(tx, {
+      id: callId,
+      clientRequestId: input.clientRequestId ?? null,
+      contactId,
+      calledAt: input.calledAt.toISOString(),
+      localDate,
+      note: parseContactNote(input.note),
+      createdAt: at,
+    });
+    await prochesRepo.insertEvent(tx, {
+      id: createId('pev'),
+      kind: 'call_logged',
+      callId,
+      contactId,
+      localDate,
+      occurredAt: at,
+    });
+    result = { ok: true, call: (await prochesRepo.getCall(tx, callId))!, duplicate: false };
+  });
+  return result;
+}
+
 export async function addContact(
   db: Db,
   input: { name: string; relation?: ProchesRelation | null; note?: string | null },

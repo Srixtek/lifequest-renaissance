@@ -44,4 +44,17 @@ suite('ProchesTracker (UI)', () => {
     const rows = await t.db.getAllAsync<{ status: string }>(`SELECT status FROM proches_calls`);
     expect(rows).toEqual([{ status: 'active' }]);
   });
+
+  test('A. formulaire ajout : aucun proche pré-sélectionné si répertoire non vide', async () => {
+    await t.db.execAsync(`
+      INSERT INTO proches_contacts (id, name, relation, note, status, created_at, updated_at)
+      VALUES ('prc_a', 'Alice', 'friend', NULL, 'active', 'x', 'x');
+    `);
+    await render(<ProchesTracker />);
+    await screen.findByText(/Semaine en cours/);
+    fireEvent.press(screen.getByText('Enregistrer un appel'));
+    await screen.findByText('Confirmer l\'appel');
+    fireEvent.press(screen.getByText('Confirmer l\'appel'));
+    await waitFor(() => expect(screen.getByText(/Choisis un proche/)).toBeTruthy());
+  });
 });
