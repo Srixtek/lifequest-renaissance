@@ -171,6 +171,96 @@ export async function bestClosedDurationSec(db: Conn, excludeSessionId: string |
   return Number(r?.m ?? 0);
 }
 
+/** Meilleure durée parmi les intervalles clôturés (non annulés) ayant commencé AVANT `startedAt` : le « record précédent » est chronologique. */
+export async function bestClosedDurationBefore(db: Conn, startedAt: string, excludeSessionId: string): Promise<number> {
+  const r = await db.getFirstAsync<{ m: number | null }>(
+    `SELECT MAX(duration_sec) AS m FROM vape_main_sessions
+     WHERE status = 'closed' AND id != ? AND started_at < ?`,
+    excludeSessionId,
+    startedAt,
+  );
+  return Number(r?.m ?? 0);
+}
+
+/**
+ * Intervalles clôturés qui ont encore potentiellement quelque chose à valider : des paliers de 30 min non réclamés,
+ * ou une durée qui dépasse tous les intervalles antérieurs et un seuil de record encore libre.
+ * Le calcul exact (plafond, records déjà payés) est refait par le service ; ceci borne seulement le nombre de lignes.
+ */
+export async function listClaimCandidateSessions(
+  db: Conn,
+  minUnclaimedRecordSec: number,
+  limit: number,
+): Promise<VapeMainSession[]> {
+  const rows = await db.getAllAsync<Record<string, unknown>>(
+    `SELECT s.* FROM vape_main_sessions s
+     WHERE s.status = 'closed' AND s.ended_at IS NOT NULL AND s.duration_sec >= 1800
+       AND (
+         s.duration_sec / 1800 > (SELECT COUNT(*) FROM vape_main_claims c WHERE c.session_id = s.id AND c.kind = 'step')
+         OR (
+           s.duration_sec >= ?
+           AND s.duration_sec > COALESCE(
+             (SELECT MAX(p.duration_sec) FROM vape_main_sessions p
+              WHERE p.status = 'closed' AND p.id != s.id AND p.started_at < s.started_at), 0)
+         )
+       )
+     ORDER BY s.ended_at DESC, s.created_at DESC
+     LIMIT ?`,
+    minUnclaimedRecordSec,
+    limit,
+  );
+  return rows.map(mapSession);
+}
+
+export interface SessionClaimBounds {
+  claimCount: number;
+  maxStep: number;
+  maxRecordMinutes: number;
+}
+
+/** Ce qui a déjà été validé pour cet intervalle (même à 0 or) : sert à refuser les corrections incohérentes. */
+export async function getSessionClaimBounds(db: Conn, sessionId: string): Promise<SessionClaimBounds> {
+  const r = await db.getFirstAsync<{ n: number; s: number | null; r: number | null }>(
+    `SELECT COUNT(*) AS n,
+            MAX(CASE WHEN kind = 'step' THEN step END) AS s,
+            MAX(CASE WHEN kind = 'record' THEN step END) AS r
+     FROM vape_main_claims WHERE session_id = ?`,
+    sessionId,
+  );
+  return { claimCount: Number(r?.n ?? 0), maxStep: Number(r?.s ?? 0), maxRecordMinutes: Number(r?.r ?? 0) };
+}
+
+/**
+ * Valide en une seule requête des paliers sans or (plafond atteint) : évite des milliers d'aller-retours SQLite
+ * pour un très long intervalle. Les paliers déjà validés sont ignorés.
+ */
+export async function insertZeroGoldStepClaims(
+  db: Conn,
+  sessionId: string,
+  fromStep: number,
+  toStep: number,
+  requestedGold: number,
+  claimedAt: string,
+): Promise<void> {
+  if (toStep < fromStep) return;
+  await db.runAsync(
+    `WITH RECURSIVE n(i) AS (SELECT ? UNION ALL SELECT i + 1 FROM n WHERE i < ?)
+     INSERT INTO vape_main_claims
+       (id, kind, session_id, step, requested_gold, granted_gold, ledger_key, claimed_at)
+     SELECT 'vcl:' || ? || ':' || i, 'step', ?, i, ?, 0, 'vape:main:' || ? || ':step:' || i, ?
+     FROM n
+     WHERE i NOT IN (SELECT step FROM vape_main_claims WHERE session_id = ? AND kind = 'step')`,
+    fromStep,
+    toStep,
+    sessionId,
+    sessionId,
+    requestedGold,
+    sessionId,
+    claimedAt,
+    sessionId,
+  );
+}
+
 export async function listClaimedSteps(db: Conn, sessionId: string): Promise<Set<number>> {
   const rows = await db.getAllAsync<{ step: number }>(
     `SELECT step FROM vape_main_claims WHERE session_id = ? AND kind = 'step'`,

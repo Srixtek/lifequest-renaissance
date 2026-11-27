@@ -110,6 +110,14 @@ async function ledgerGold(db: TestDb['db'], like = '%'): Promise<number> {
   return Number(r?.s ?? 0);
 }
 
+/** Réclame la période la plus récente (comme le bouton de l'UI sur la période affichée en premier). */
+async function claimLatest(db: TestDb['db'], opts: { confirmed: boolean; now?: Date }) {
+  const row = await db.getFirstAsync<{ id: string }>(
+    `SELECT id FROM vape_main_sessions WHERE status IN ('active','closed') ORDER BY started_at DESC, rowid DESC LIMIT 1`,
+  );
+  return claimVapeRewards(db, { ...opts, sessionId: row?.id ?? 'aucune' });
+}
+
 async function ageChallengeSession(db: TestDb['db'], sessionId: string, secondsAgo: number) {
   const started = new Date(Date.now() - secondsAgo * 1000).toISOString();
   await db.runAsync(`UPDATE challenge_sessions SET started_utc = ? WHERE id = ?`, started, sessionId);
@@ -226,8 +234,8 @@ suite('tracker vape — SQLite réel (node:sqlite)', () => {
       expect(dash.active?.clockAnomaly).toBe(true);
       expect(dash.active?.elapsedSec).toBe(0);
       expect(dash.next).toBeNull();
-      expect(dash.claim).toBeNull();
-      expect(await claimVapeRewards(t.db, { confirmed: true, now: early })).toMatchObject({ ok: false });
+      expect(dash.claims).toEqual([]);
+      expect(await claimLatest(t.db, { confirmed: true, now: early })).toMatchObject({ ok: false });
       expect(await declareVape(t.db, { now: early })).toMatchObject({ ok: false, code: 'clock_anomaly' });
       expect(await declareVape(t.db, { endedAt: at(-MIN), now: at(HOUR) })).toMatchObject({
         ok: false,
@@ -250,14 +258,14 @@ suite('tracker vape — SQLite réel (node:sqlite)', () => {
   describe('paliers et récompenses', () => {
     test('confirmation explicite obligatoire ; rien sans confirmation', async () => {
       await startVapeMainSession(t.db, T0);
-      const r = await claimVapeRewards(t.db, { confirmed: false, now: at(2 * HOUR) });
+      const r = await claimLatest(t.db, { confirmed: false, now: at(2 * HOUR) });
       expect(r).toEqual({ ok: false, code: 'not_confirmed' });
       expect(await ledgerGold(t.db)).toBe(0);
     });
 
     test('rien avant 30 min', async () => {
       await startVapeMainSession(t.db, T0);
-      expect(await claimVapeRewards(t.db, { confirmed: true, now: at(29 * MIN + 59_000) })).toMatchObject({
+      expect(await claimLatest(t.db, { confirmed: true, now: at(29 * MIN + 59_000) })).toMatchObject({
         ok: false,
         code: 'nothing_to_claim',
       });
@@ -266,7 +274,7 @@ suite('tracker vape — SQLite réel (node:sqlite)', () => {
     test('crédit du montant réel, solde = ledger, clé unique session+palier', async () => {
       await startVapeMainSession(t.db, T0);
       await rpgRepo.addGold(t.db, 100, 'départ', 'seed:gold');
-      const r = await claimVapeRewards(t.db, { confirmed: true, now: at(95 * MIN) });
+      const r = await claimLatest(t.db, { confirmed: true, now: at(95 * MIN) });
       expect(r.ok).toBe(true);
       if (!r.ok) return;
       expect(r.stepsValidated).toBe(3);
@@ -286,15 +294,15 @@ suite('tracker vape — SQLite réel (node:sqlite)', () => {
       const dash = await getVapeTrackerDashboard(t.db, at(95 * MIN));
       expect(dash.recentRewards.reduce((s, x) => s + x.amount, 0)).toBe(r.grantedGold);
       expect(dash.goldBalance).toBe(r.balance);
-      expect(dash.claim).toBeNull();
+      expect(dash.claims).toEqual([]);
     });
 
     test('deux réclamations simultanées = un seul crédit', async () => {
       await startVapeMainSession(t.db, T0);
       const now = at(2 * HOUR);
       const [a, b] = await Promise.all([
-        claimVapeRewards(t.db, { confirmed: true, now }),
-        claimVapeRewards(t.db, { confirmed: true, now }),
+        claimLatest(t.db, { confirmed: true, now }),
+        claimLatest(t.db, { confirmed: true, now }),
       ]);
       expect([a, b].filter((x) => x.ok)).toHaveLength(1);
       expect([a, b].find((x) => !x.ok)).toMatchObject({ code: 'nothing_to_claim' });
@@ -305,27 +313,27 @@ suite('tracker vape — SQLite réel (node:sqlite)', () => {
 
     test('pas de re-récompense après redémarrage, clôture ou annulation/relance', async () => {
       await startVapeMainSession(t.db, T0);
-      await claimVapeRewards(t.db, { confirmed: true, now: at(HOUR) });
+      await claimLatest(t.db, { confirmed: true, now: at(HOUR) });
       const paid = await ledgerGold(t.db, 'vape:%');
       expect(paid).toBe(2 * VAPE_STEP_GOLD + 4);
 
       await declareVape(t.db, { now: at(HOUR + 10 * MIN) });
-      expect(await claimVapeRewards(t.db, { confirmed: true, now: at(HOUR + 11 * MIN) })).toMatchObject({
+      expect(await claimLatest(t.db, { confirmed: true, now: at(HOUR + 11 * MIN) })).toMatchObject({
         ok: false,
       });
       await undoLastDeclaration(t.db, at(HOUR + 12 * MIN));
       await declareVape(t.db, { now: at(HOUR + 20 * MIN) });
       await startVapeMainSession(t.db, at(HOUR + 21 * MIN));
-      await claimVapeRewards(t.db, { confirmed: true, now: at(HOUR + 40 * MIN) });
+      await claimLatest(t.db, { confirmed: true, now: at(HOUR + 40 * MIN) });
       expect(await ledgerGold(t.db, 'vape:%')).toBe(paid);
     });
 
     test('un nouvel intervalle ne re-récompense pas les paliers de l\'ancien, mais a les siens', async () => {
       await startVapeMainSession(t.db, T0);
-      await claimVapeRewards(t.db, { confirmed: true, now: at(HOUR) });
+      await claimLatest(t.db, { confirmed: true, now: at(HOUR) });
       await declareVape(t.db, { now: at(HOUR + MIN) });
       await startVapeMainSession(t.db, at(HOUR + 2 * MIN));
-      const r = await claimVapeRewards(t.db, { confirmed: true, now: at(HOUR + 2 * MIN + 31 * MIN) });
+      const r = await claimLatest(t.db, { confirmed: true, now: at(HOUR + 2 * MIN + 31 * MIN) });
       expect(r.ok && r.stepsValidated).toBe(1);
       expect(await ledgerGold(t.db, 'vape:main:%')).toBe(3 * VAPE_STEP_GOLD);
     });
@@ -334,7 +342,7 @@ suite('tracker vape — SQLite réel (node:sqlite)', () => {
       const day = at(0).toISOString();
       await rpgRepo.addGold(t.db, SHARED_DAILY_GOLD_CAP - 3, 'quête', 'renewable:inst1:reward', day);
       await startVapeMainSession(t.db, T0);
-      const r = await claimVapeRewards(t.db, { confirmed: true, now: at(3 * HOUR) });
+      const r = await claimLatest(t.db, { confirmed: true, now: at(3 * HOUR) });
       expect(r.ok).toBe(true);
       if (!r.ok) return;
       expect(r.grantedGold).toBe(3);
@@ -352,7 +360,7 @@ suite('tracker vape — SQLite réel (node:sqlite)', () => {
     test('à l\'inverse, l\'or vape réduit le plafond des quêtes renouvelables', async () => {
       const now = new Date();
       await startVapeMainSession(t.db, new Date(now.getTime() - 3 * HOUR));
-      const r = await claimVapeRewards(t.db, { confirmed: true, now });
+      const r = await claimLatest(t.db, { confirmed: true, now });
       expect(r.ok && r.grantedGold).toBe(6 * VAPE_STEP_GOLD + 4 + 5);
       const board = await getRenewableQuestBoard(t.db);
       expect(board.dailyGoldRemaining).toBe(SHARED_DAILY_GOLD_CAP - (6 * VAPE_STEP_GOLD + 9));
@@ -361,9 +369,9 @@ suite('tracker vape — SQLite réel (node:sqlite)', () => {
     test('plafond atteint : paliers consommés à 0 or, pas de reversement le lendemain', async () => {
       await rpgRepo.addGold(t.db, SHARED_DAILY_GOLD_CAP, 'quêtes', 'renewable:a:reward', at(0).toISOString());
       await startVapeMainSession(t.db, T0);
-      const r = await claimVapeRewards(t.db, { confirmed: true, now: at(2 * HOUR) });
+      const r = await claimLatest(t.db, { confirmed: true, now: at(2 * HOUR) });
       expect(r.ok && r.grantedGold).toBe(0);
-      const next = await claimVapeRewards(t.db, { confirmed: true, now: at(30 * HOUR) });
+      const next = await claimLatest(t.db, { confirmed: true, now: at(30 * HOUR) });
       expect(next.ok && next.stepsValidated).toBe(60 - 4);
       const early = await t.db.getAllAsync<{ granted_gold: number }>(
         `SELECT granted_gold FROM vape_main_claims WHERE kind = 'step' AND step <= 4`,
@@ -381,7 +389,7 @@ suite('tracker vape — SQLite réel (node:sqlite)', () => {
       await startVapeMainSession(t.db, T0);
       const d1 = await declareVape(t.db, { now: at(2 * HOUR + 5 * MIN) });
       expect(d1.ok && d1.newRecord).toBe(true);
-      const c1 = await claimVapeRewards(t.db, { confirmed: true, now: at(2 * HOUR + 6 * MIN) });
+      const c1 = await claimLatest(t.db, { confirmed: true, now: at(2 * HOUR + 6 * MIN) });
       expect(c1.ok).toBe(true);
       if (!c1.ok) return;
       expect(c1.recordBonuses.map((r) => r.minutes)).toEqual([60, 120]);
@@ -392,13 +400,13 @@ suite('tracker vape — SQLite réel (node:sqlite)', () => {
       await startVapeMainSession(t.db, at(base));
       const mid = await getVapeTrackerDashboard(t.db, at(base + 2 * HOUR + 10 * MIN));
       expect(mid.currentIsRecord).toBe(true);
-      const c2 = await claimVapeRewards(t.db, { confirmed: true, now: at(base + 2 * HOUR + 10 * MIN) });
+      const c2 = await claimLatest(t.db, { confirmed: true, now: at(base + 2 * HOUR + 10 * MIN) });
       expect(c2.ok && c2.recordBonuses).toEqual([]);
       expect(await ledgerGold(t.db, 'vape:record:%')).toBe(gold1);
 
-      const c3 = await claimVapeRewards(t.db, { confirmed: true, now: at(base + 4 * HOUR + 1) });
+      const c3 = await claimLatest(t.db, { confirmed: true, now: at(base + 4 * HOUR + 1) });
       expect(c3.ok && c3.recordBonuses.map((r) => r.minutes)).toEqual([240]);
-      const c4 = await claimVapeRewards(t.db, { confirmed: true, now: at(base + 4 * HOUR + 40 * MIN) });
+      const c4 = await claimLatest(t.db, { confirmed: true, now: at(base + 4 * HOUR + 40 * MIN) });
       expect(c4.ok && c4.recordBonuses).toEqual([]);
       expect(await t.db.getAllAsync(`SELECT step FROM vape_main_claims WHERE kind = 'record'`)).toHaveLength(3);
     });
@@ -418,7 +426,7 @@ suite('tracker vape — SQLite réel (node:sqlite)', () => {
       const now = at(5 * 24 * HOUR);
       const dash = await getVapeTrackerDashboard(t.db, now);
       expect(dash.active?.elapsedSec).toBe(5 * 86400);
-      const r = await claimVapeRewards(t.db, { confirmed: true, now });
+      const r = await claimLatest(t.db, { confirmed: true, now });
       expect(r.ok).toBe(true);
       if (!r.ok) return;
       expect(r.stepsValidated).toBe(5 * 48);
@@ -583,7 +591,7 @@ suite('tracker vape — SQLite réel (node:sqlite)', () => {
 
     test('les nouvelles tables sont exportées et restaurées avec la sauvegarde', async () => {
       await startVapeMainSession(t.db, T0);
-      await claimVapeRewards(t.db, { confirmed: true, now: at(HOUR + 5 * MIN) });
+      await claimLatest(t.db, { confirmed: true, now: at(HOUR + 5 * MIN) });
       await declareVape(t.db, { now: at(HOUR + 10 * MIN) });
       await startVapeMainSession(t.db, at(HOUR + 11 * MIN));
 

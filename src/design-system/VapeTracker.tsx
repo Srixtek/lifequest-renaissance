@@ -21,7 +21,7 @@ import {
   type VapeTrackerDashboard,
 } from '../domain/services/vapeTrackerService';
 import { formatChallengeHms } from '../domain/rules/challengeDuration';
-import { formatDuration, nextStepInfo, safeElapsedSec, stepsReached } from '../domain/rules/vapeMain';
+import { claimOfferTexts, formatDuration, nextStepInfo, safeElapsedSec, stepsReached } from '../domain/rules/vapeMain';
 import { friendlyDbError } from '../utils/dbErrors';
 
 function formatWhen(iso: string): string {
@@ -37,6 +37,9 @@ function outcomeLabel(outcome: string): string {
   return outcome;
 }
 
+const REWARDS_CLAIMED_MSG =
+  'Correction refusée : des paliers ou bonus de cette période sont déjà validés (l\'or est définitif). Choisis une heure qui les conserve, ou laisse l\'intervalle tel quel.';
+
 const PAST_PRESETS: Array<{ label: string; minutes: number }> = [
   { label: 'il y a 15 min', minutes: 15 },
   { label: 'il y a 1 h', minutes: 60 },
@@ -49,7 +52,7 @@ export function VapeTracker() {
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [confirmClaim, setConfirmClaim] = useState(false);
+  const [confirmSessionId, setConfirmSessionId] = useState<string | null>(null);
   const [cravingChoice, setCravingChoice] = useState(false);
   const lock = useRef(false);
 
@@ -116,7 +119,7 @@ export function VapeTracker() {
         setMsg('Un ancien chrono vape (record / intervalle) est en cours : termine-le depuis « Anciens défis » avant de démarrer.');
         return;
       }
-      setConfirmClaim(false);
+      setConfirmSessionId(null);
       setMsg(r.alreadyActive ? 'Le chrono tourne déjà.' : 'Chrono lancé. Tu peux fermer l\'app : le temps est calculé depuis l\'heure de départ.');
     });
 
@@ -134,11 +137,13 @@ export function VapeTracker() {
             ? 'Aucun chrono en cours — déjà enregistré.'
             : r.code === 'clock_anomaly'
               ? 'L\'horloge du téléphone semble décalée : annule ce chrono puis relance-le.'
-              : 'Heure incohérente (avant le départ ou dans le futur).',
+              : r.code === 'rewards_claimed'
+                ? REWARDS_CLAIMED_MSG
+                : 'Heure incohérente (avant le départ ou dans le futur).',
         );
         return;
       }
-      setConfirmClaim(false);
+      setConfirmSessionId(null);
       const parts = [`Enregistré : ${formatDuration(r.durationSec)} sans vapoter. Ce n'est pas un échec définitif.`];
       if (r.newRecord) parts.push('Nouveau record personnel !');
       if (r.unclaimedSteps > 0) parts.push(`${r.unclaimedSteps} palier(s) à confirmer ci-dessous.`);
@@ -159,7 +164,9 @@ export function VapeTracker() {
       setMsg(
         r.ok
           ? `Heure corrigée : ${formatDuration(r.durationSec)} sans vapoter. L'ancienne heure est conservée.`
-          : 'Cette heure n\'est pas possible (avant le départ ou après la déclaration).',
+          : r.code === 'rewards_claimed'
+            ? REWARDS_CLAIMED_MSG
+            : 'Cette heure n\'est pas possible (avant le départ ou après la déclaration).',
       );
     });
 
@@ -168,16 +175,23 @@ export function VapeTracker() {
       if (!dash?.active) return;
       const db = await getDb();
       const r = await voidVapeSession(db, dash.active.id);
-      setMsg(r.ok ? 'Chrono annulé (gardé dans l\'historique, hors record).' : 'Rien à annuler.');
+      setMsg(
+        r.ok
+          ? 'Chrono annulé (gardé dans l\'historique, hors record).'
+          : r.code === 'rewards_claimed'
+            ? 'Annulation refusée : des paliers ou bonus de ce chrono sont déjà validés (l\'or est définitif). Utilise « J\'ai vapoté » pour le clôturer.'
+            : 'Rien à annuler.',
+      );
     });
 
-  const claim = () =>
+  const claim = (sessionId: string) =>
     run(async () => {
       const db = await getDb();
-      const r = await claimVapeRewards(db, { confirmed: true });
-      setConfirmClaim(false);
+      const r = await claimVapeRewards(db, { confirmed: true, sessionId });
+      setConfirmSessionId(null);
       if (r.ok) setMsg(r.message);
-      else if (r.code === 'nothing_to_claim') setMsg('Rien de nouveau à récupérer.');
+      else if (r.code === 'nothing_to_claim') setMsg('Rien de nouveau à récupérer pour cette période.');
+      else if (r.code === 'session_unavailable') setMsg('Cette période a changé entre-temps : vérifie-la puis réessaie.');
       else setMsg('Horloge incohérente : rien n\'a été crédité.');
     });
 
@@ -201,13 +215,19 @@ export function VapeTracker() {
       const db = await getDb();
       const r = await resolveCraving(db, dash.craving.attemptId, outcome);
       if (!r.ok) {
-        setMsg(r.code === 'too_early' ? 'Pas encore : attends la fin du compte à rebours pour valider.' : 'Clôture impossible, réessaie.');
+        setMsg(
+          r.code === 'too_early'
+            ? 'Pas encore : attends la fin du compte à rebours pour valider.'
+            : r.code === 'not_found'
+              ? 'Cette envie est déjà clôturée (par exemple après « J\'ai vapoté ») : rien à valider.'
+              : 'Clôture impossible, réessaie.',
+        );
         return;
       }
       if (outcome === 'held') {
         setMsg(
           r.goldGranted
-            ? 'Envie surmontée, bravo ! +3 or (récompense unique pour ce palier de défi).'
+            ? `Envie surmontée, bravo ! +${r.goldAmount} or (récompense unique pour ce palier de défi).`
             : 'Envie surmontée, bravo ! Pas d\'or cette fois (récompense déjà obtenue pour ce palier, ou plafond du jour).',
         );
       } else if (outcome === 'gave_in') {
@@ -233,7 +253,6 @@ export function VapeTracker() {
   const elapsed = activeElapsed?.sec ?? 0;
   const next = active && !activeElapsed?.anomaly ? nextStepInfo(elapsed) : null;
   const recordShown = active ? Math.max(dash.bestClosedSec, elapsed) : dash.bestClosedSec;
-  const claim_ = dash.claim;
   const cravingRemaining = dash.craving ? Math.max(0, dash.craving.targetSec - safeElapsedSec(dash.craving.startedAt, nowMs).sec) : 0;
   const cravingElapsed = dash.craving ? safeElapsedSec(dash.craving.startedAt, nowMs).sec : 0;
 
@@ -290,41 +309,46 @@ export function VapeTracker() {
         </View>
         {active && elapsed > dash.bestClosedSec && dash.bestClosedSec > 0 ? <Text style={styles.recordLive}>Tu es en train de battre ton record !</Text> : null}
 
-        {claim_ ? (
-          <View style={styles.claimBox}>
-            {dash.dailyGoldRemaining <= 0 ? (
-              <Body muted>
-                {claim_.stepsPending} palier(s) atteint(s). Plafond d'or du jour atteint ({dash.dailyGoldCap} or) : la progression
-                continue, sans or supplémentaire aujourd'hui.
-              </Body>
-            ) : confirmClaim ? (
-              <>
-                <Body>
-                  Tu confirmes ne pas avoir vapoté pendant ces {formatDuration(claim_.confirmedSec)} ? Personne ne le vérifie : c'est
-                  ta parole. Si ce n'est pas exact, corrige l'heure avant de récupérer.
-                </Body>
-                <View style={styles.row}>
+        {dash.claims.map((c) => {
+          const texts = claimOfferTexts({
+            stepsPending: c.stepsPending,
+            recordBonusCount: c.recordsPending.length,
+            creditableGold: c.creditableGold,
+            dailyGoldRemaining: dash.dailyGoldRemaining,
+            dailyGoldCap: dash.dailyGoldCap,
+          });
+          const period = c.endedAt
+            ? `du ${formatWhen(c.startedAt)} au ${formatWhen(c.endedAt)}`
+            : `depuis ${formatWhen(c.startedAt)} jusqu'à maintenant`;
+          return (
+            <View key={c.sessionId} style={styles.claimBox}>
+              <Text style={styles.claimPeriod}>
+                {c.endedAt ? 'Intervalle terminé' : 'Chrono en cours'} · {period} · {formatDuration(c.confirmedSec)}
+              </Text>
+              {confirmSessionId === c.sessionId ? (
+                <>
+                  <Body>
+                    Tu confirmes ne pas avoir vapoté {period} ({formatDuration(c.confirmedSec)}) ? Personne ne le vérifie :
+                    c'est ta parole. Si ce n'est pas exact, corrige l'heure avant de valider.
+                  </Body>
+                  <View style={styles.row}>
+                    <Button label={texts.confirmLabel} onPress={() => void claim(c.sessionId)} disabled={busy} />
+                    <Button label="Pas sûr·e" variant="ghost" onPress={() => setConfirmSessionId(null)} disabled={busy} />
+                  </View>
+                </>
+              ) : (
+                <>
+                  <Body muted={texts.zeroGold}>{texts.summary}</Body>
                   <Button
-                    label={`Oui, je confirme (+${claim_.creditableGold} or)`}
-                    onPress={() => void claim()}
+                    label={texts.zeroGold ? 'Valider sans or' : 'Confirmer et récupérer'}
+                    onPress={() => setConfirmSessionId(c.sessionId)}
                     disabled={busy}
                   />
-                  <Button label="Pas sûr·e" variant="ghost" onPress={() => setConfirmClaim(false)} disabled={busy} />
-                </View>
-              </>
-            ) : (
-              <>
-                <Body>
-                  {claim_.stepsPending > 0 ? `${claim_.stepsPending} palier(s) de 30 min à confirmer` : 'Bonus de record à confirmer'}
-                  {claim_.recordsPending.length > 0 ? ' + bonus de record' : ''} — jusqu'à{' '}
-                  <Text style={styles.gold}>+{claim_.creditableGold} or</Text> (plafond du jour : {dash.dailyGoldRemaining} or
-                  restants).
-                </Body>
-                <Button label="Confirmer et récupérer" onPress={() => setConfirmClaim(true)} disabled={busy} />
-              </>
-            )}
-          </View>
-        ) : null}
+                </>
+              )}
+            </View>
+          );
+        })}
       </FantasyPanel>
 
       {msg ? <Text style={styles.msg}>{msg}</Text> : null}
@@ -461,6 +485,7 @@ const styles = StyleSheet.create({
   recordLabel: { ...typography.caption, color: colors.muted },
   recordValue: { ...typography.subtitle, color: colors.gold },
   recordLive: { ...typography.caption, color: colors.success, marginTop: 2 },
+  claimPeriod: { ...typography.caption, color: colors.muted, marginBottom: 4 },
   claimBox: {
     marginTop: spacing.md,
     padding: spacing.sm,

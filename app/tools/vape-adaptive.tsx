@@ -141,7 +141,7 @@ export default function VapeAdaptiveScreen() {
       }
       const parts = [];
       if (r.tierMessage) parts.push(r.tierMessage);
-      if (r.goldGranted) parts.push(`+${3} or pour ce palier confirmé.`);
+      if (r.goldGranted) parts.push(`+${r.goldAmount} or pour ce palier confirmé.`);
       if (mode === 'vaped' && dash.running.format === 'record') {
         parts.push('Durée tenue enregistrée dans ton record si c\'est ton meilleur temps.');
       } else if (r.attempt.outcome === 'success') {
