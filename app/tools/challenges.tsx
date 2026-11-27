@@ -144,6 +144,13 @@ export default function ChallengesScreen() {
           }
         }
       }
+      if (type === 'no_vape') {
+        const { getActiveSession } = await import('@/src/data/db/repositories/vapeMainRepo');
+        if (await getActiveSession(db)) {
+          setMsg('Ton chrono principal (Habitudes → Vape) est déjà en cours : pas besoin de ce second chrono.');
+          return;
+        }
+      }
       const r = await startChallengeSession(db, type, target);
       if (!r.ok) {
         setMsg('Un défi est déjà en cours pour ce type.');

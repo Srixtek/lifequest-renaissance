@@ -30,10 +30,12 @@ import {
 import { nowIso } from '../rules/dates';
 import { createId } from '../../utils/id';
 import { recordBreathingSessionOnConn } from './vapeBreathingSession';
+import * as vapeMainRepo from '../../data/db/repositories/vapeMainRepo';
+import { sharedGoldRemainingToday } from './goldDailyCap';
 
 export type StartAdaptiveResult =
   | { ok: true; attempt: AdaptiveChallengeAttempt }
-  | { ok: false; code: 'category_inactive' | 'already_running' | 'session_busy' };
+  | { ok: false; code: 'category_inactive' | 'already_running' | 'session_busy' | 'main_chrono_active' };
 
 export type CloseAdaptiveResult =
   | { ok: true; attempt: AdaptiveChallengeAttempt; tierMessage: string | null; goldGranted: boolean }
@@ -124,13 +126,21 @@ export async function resumeAutoVapeTier(db: Db, track: VapeTierTrack): Promise<
   return adaptiveRepo.getOrInitState(db, VAPE_HABIT_CATEGORY);
 }
 
+export interface StartAdaptiveOptions {
+  /** Appelé dans la même transaction que l'insertion de la tentative. */
+  onStarted?: (tx: Db, attempt: AdaptiveChallengeAttempt) => Promise<void>;
+  /** Par défaut l'habitude Vape doit être active ; le tracker vape fonctionne aussi sans objectif. */
+  requireActiveGoal?: boolean;
+}
+
 export async function startVapeAdaptiveChallenge(
   db: Db,
   format: VapeChallengeFormat,
+  opts?: StartAdaptiveOptions,
 ): Promise<StartAdaptiveResult> {
   let result: StartAdaptiveResult = { ok: false, code: 'category_inactive' };
   await db.withExclusiveTransactionAsync(async (tx) => {
-    if (!(await vapeGoalActive(tx))) {
+    if (opts?.requireActiveGoal !== false && !(await vapeGoalActive(tx))) {
       result = { ok: false, code: 'category_inactive' };
       return;
     }
@@ -138,6 +148,12 @@ export async function startVapeAdaptiveChallenge(
     if (running) {
       result = { ok: false, code: 'already_running' };
       return;
+    }
+    if (format === 'record' || format === 'interval') {
+      if (await vapeMainRepo.getActiveSession(tx)) {
+        result = { ok: false, code: 'main_chrono_active' };
+        return;
+      }
     }
     const state = await adaptiveRepo.getOrInitState(tx, VAPE_HABIT_CATEGORY);
     const tierSnap = tierIndexForFormat(state, format);
@@ -164,6 +180,7 @@ export async function startVapeAdaptiveChallenge(
       updatedAt: now,
     };
     await adaptiveRepo.insertAttempt(tx, attempt);
+    if (opts?.onStarted) await opts.onStarted(tx, attempt);
     result = { ok: true, attempt };
   });
   return result;
@@ -207,9 +224,11 @@ async function maybeGrantTierGold(
   const track = tierTrackForFormat(attempt.format);
   if (!track) return false;
   const key = `adaptive:vape:${attempt.format}:tier:${attempt.tierIndex}:gold`;
+  const amount = Math.min(VAPE_TIER_GOLD_REWARD, await sharedGoldRemainingToday(tx));
+  if (amount <= 0) return false;
   const r = await rpgRepo.addGold(
     tx,
-    VAPE_TIER_GOLD_REWARD,
+    amount,
     `Palier vape (${attempt.format}) ${attempt.tierIndex + 1} confirmé`,
     key,
   );
@@ -220,9 +239,11 @@ async function maybeGrantRecordMilestoneGold(tx: Db, durationSec: number): Promi
   const milestone = highestRecordMilestoneMinutes(durationSec);
   if (milestone == null) return false;
   const key = `adaptive:vape:record:milestone:${milestone}:gold`;
+  const amount = Math.min(VAPE_TIER_GOLD_REWARD, await sharedGoldRemainingToday(tx));
+  if (amount <= 0) return false;
   const r = await rpgRepo.addGold(
     tx,
-    VAPE_TIER_GOLD_REWARD,
+    amount,
     `Record vape — palier ${milestone} min`,
     key,
   );

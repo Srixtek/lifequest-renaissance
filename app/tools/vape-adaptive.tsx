@@ -111,6 +111,9 @@ export default function VapeAdaptiveScreen() {
       if (!r.ok) {
         if (r.code === 'category_inactive') setMsg('Active d\'abord l\'habitude Vape pour voir les défis.');
         else if (r.code === 'already_running') setMsg('Un défi adaptatif est déjà en cours.');
+        else if (r.code === 'main_chrono_active') {
+          setMsg('Ton chrono principal (Habitudes → Vape) est en cours : ce défi multi-heures ferait doublon. Utilise le chrono principal.');
+        }
         else setMsg('Impossible de démarrer — un chronomètre vape est peut-être déjà actif.');
         return;
       }

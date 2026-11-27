@@ -15,6 +15,7 @@ import * as goalRepo from '../../data/db/repositories/goalRepo';
 import * as kingdomRepo from '../../data/db/repositories/kingdomRepo';
 import * as rpgRepo from '../../data/db/repositories/rpgRepo';
 import { createId } from '../../utils/id';
+import { getSharedGoldEarnedToday, utcDayStart } from './goldDailyCap';
 import {
   evaluateRenewableProof,
   parseProgressJson,
@@ -137,18 +138,7 @@ async function ensureOffers(db: Conn): Promise<void> {
 }
 
 export async function getRenewableGoldEarnedToday(db: Conn, dayStartIso: string): Promise<number> {
-  const r = await db.getFirstAsync<{ s: number }>(
-    `SELECT COALESCE(SUM(amount), 0) AS s FROM wallet_ledger
-     WHERE resource = 'gold' AND idempotency_key LIKE 'renewable:%' AND created_at >= ?`,
-    dayStartIso,
-  );
-  return Number(r?.s ?? 0);
-}
-
-function utcDayStart(now = new Date()): string {
-  const d = new Date(now);
-  d.setUTCHours(0, 0, 0, 0);
-  return d.toISOString();
+  return getSharedGoldEarnedToday(db, dayStartIso);
 }
 
 export async function getRenewableQuestBoard(db: Conn): Promise<RenewableQuestBoard> {
