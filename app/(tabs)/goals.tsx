@@ -40,6 +40,7 @@ import { presentHabitCard } from '@/src/domain/content/habitPresentation';
 import { VapeTracker } from '@/src/design-system/VapeTracker';
 import { AlcoholTracker } from '@/src/design-system/AlcoholTracker';
 import { SportTracker } from '@/src/design-system/SportTracker';
+import { ProchesTracker } from '@/src/design-system/ProchesTracker';
 
 const STATUS_FR: Record<TrackingStatus, string> = {
   unknown: 'Non renseigné',
@@ -329,6 +330,7 @@ export default function GoalsScreen() {
             {categoryId === 'vape' ? <VapeTracker /> : null}
             {categoryId === 'alcool' ? <AlcoholTracker /> : null}
             {categoryId === 'sport' ? <SportTracker /> : null}
+            {categoryId === 'proches' ? <ProchesTracker /> : null}
           </>
         ) : (
           <>
@@ -382,7 +384,7 @@ export default function GoalsScreen() {
           </View>
         ) : null}
 
-        {(mode === 'challenges' || (inCategory && categoryId !== 'alcool' && categoryId !== 'sport')) && goalsToRender.length === 0 ? (
+        {(mode === 'challenges' || (inCategory && categoryId !== 'alcool' && categoryId !== 'sport' && categoryId !== 'proches')) && goalsToRender.length === 0 ? (
           <EmptyState
             title={mode === 'track' ? 'Aucune habitude ici' : 'Aucun défi disponible'}
             hint={

@@ -630,7 +630,7 @@ suite('V1-02B — journal alcool (SQLite réel)', () => {
     expect(await dump()).toEqual(before);
 
     const versions = (await t.db.getAllAsync<{ version: number }>(`SELECT version FROM schema_migrations ORDER BY version`)).map((r) => r.version);
-    expect(versions).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]);
+    expect(versions).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
     const names = (await t.db.getAllAsync<{ name: string }>(`SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'alcohol_%' ORDER BY name`)).map((r) => r.name);
     expect(names).toEqual([
       'alcohol_consumptions',

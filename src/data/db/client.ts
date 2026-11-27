@@ -13,6 +13,7 @@ import migration011 from './migrations/011_habit_categories';
 import migration012 from './migrations/012_vape_tracker';
 import migration013 from './migrations/013_alcohol_tracker';
 import migration014 from './migrations/014_sport_tracker';
+import migration015 from './migrations/015_proches_tracker';
 
 export type Db = SQLite.SQLiteDatabase;
 
@@ -31,6 +32,7 @@ const MIGRATIONS: Array<{ version: number; sql: string }> = [
   { version: 12, sql: migration012 },
   { version: 13, sql: migration013 },
   { version: 14, sql: migration014 },
+  { version: 15, sql: migration015 },
 ];
 
 let dbPromise: Promise<Db> | null = null;
