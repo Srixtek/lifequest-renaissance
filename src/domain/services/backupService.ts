@@ -53,10 +53,16 @@ const TABLES = [
   'proches_weekly_goals',
   'proches_corrections',
   'proches_events',
+  'divers_day_slots',
+  'divers_completions',
+  'divers_events',
 ] as const;
 
 /** Ordre enfants → parents (FK) pour un vidage sans orphelins. */
 const WIPE_ORDER: readonly string[] = [
+  'divers_events',
+  'divers_completions',
+  'divers_day_slots',
   'proches_events',
   'proches_corrections',
   'proches_calls',
