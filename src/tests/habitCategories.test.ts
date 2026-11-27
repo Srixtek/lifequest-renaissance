@@ -128,7 +128,7 @@ suite('catégories — SQLite réel (node:sqlite)', () => {
     expect(after).toEqual(before);
 
     const applied = await t.db.getAllAsync<{ version: number }>(`SELECT version FROM schema_migrations ORDER BY version`);
-    expect(applied.map((r) => r.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
+    expect(applied.map((r) => r.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]);
 
     const goals = await goalRepo.listGoals(t.db, true);
     const byId = Object.fromEntries(goals.map((g) => [g.id, g]));

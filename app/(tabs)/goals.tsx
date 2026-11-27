@@ -39,6 +39,7 @@ import { challengeTypeForTemplate } from '@/src/domain/models/challengeSession';
 import { presentHabitCard } from '@/src/domain/content/habitPresentation';
 import { VapeTracker } from '@/src/design-system/VapeTracker';
 import { AlcoholTracker } from '@/src/design-system/AlcoholTracker';
+import { SportTracker } from '@/src/design-system/SportTracker';
 
 const STATUS_FR: Record<TrackingStatus, string> = {
   unknown: 'Non renseigné',
@@ -327,6 +328,7 @@ export default function GoalsScreen() {
             </Text>
             {categoryId === 'vape' ? <VapeTracker /> : null}
             {categoryId === 'alcool' ? <AlcoholTracker /> : null}
+            {categoryId === 'sport' ? <SportTracker /> : null}
           </>
         ) : (
           <>
@@ -380,7 +382,7 @@ export default function GoalsScreen() {
           </View>
         ) : null}
 
-        {(mode === 'challenges' || (inCategory && categoryId !== 'alcool')) && goalsToRender.length === 0 ? (
+        {(mode === 'challenges' || (inCategory && categoryId !== 'alcool' && categoryId !== 'sport')) && goalsToRender.length === 0 ? (
           <EmptyState
             title={mode === 'track' ? 'Aucune habitude ici' : 'Aucun défi disponible'}
             hint={
@@ -389,6 +391,10 @@ export default function GoalsScreen() {
                 : 'Active une habitude avec défi (ex. vape) depuis l\'onglet Suivre.'
             }
           />
+        ) : null}
+
+        {mode === 'track' && categoryId === 'sport' && goalsToRender.length > 0 ? (
+          <Text style={styles.sectionHeading}>Mes habitudes Sport</Text>
         ) : null}
 
         {goalsToRender.map((g) => {

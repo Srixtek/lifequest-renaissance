@@ -1,5 +1,12 @@
 # Changelog
 
+## V1-03A — Sport : performances, séances, records, objectifs progressifs
+
+- Habitudes → Sport : fiche avec activités Pompes / Marche / Course / Séance libre, « Enregistrer une séance », séances multiples par jour (nombre, total, meilleure séance, durée et distance totales), records par activité recalculés, objectif versionné, suggestion d'objectif jamais automatique, historique, correction et annulation tracées. Voir `docs/SPORT_TRACKER.md`.
+- Tentative échouée conservée avec sa performance réelle (comptée dans les totaux et le record) ; jamais convertie en réussite ; « Atteint » refusé sous la cible.
+- Unités entières : répétitions, secondes, mètres. Migration 014 (`sport_activities`, `sport_goals`, `sport_sessions`, `sport_corrections`, `sport_events`), toutes dans la sauvegarde `.lqbackup`.
+- Aucun XP, or ni éclat attribué ; suivi Sport historique (`sport_minutes`, chrono, quêtes) inchangé. Preuves structurées exposées par `listSportEvidence` pour une future mission Quêtes.
+
 ## V1-02B — Alcool : journal, unités standard, chrono, objectif
 
 - Habitudes → Alcool : fiche avec verres standard du jour / 7 derniers jours / semaine civile, objectif hebdomadaire, chrono depuis la dernière boisson enregistrée (ou un départ explicitement confirmé), « Ajouter une boisson », historique par jour, correction et annulation tracées. Voir `docs/ALCOHOL_TRACKER.md`.
