@@ -3,6 +3,7 @@ import JSZip from 'jszip';
 import type { Db } from '../../data/db/client';
 import { migrate } from '../../data/db/client';
 import * as kingdomRepo from '../../data/db/repositories/kingdomRepo';
+import * as sportRepo from '../../data/db/repositories/sportRepo';
 
 const TABLES = [
   'profiles',
@@ -42,10 +43,20 @@ const TABLES = [
   'alcohol_start_markers',
   'alcohol_weekly_goals',
   'alcohol_events',
+  'sport_activities',
+  'sport_goals',
+  'sport_sessions',
+  'sport_corrections',
+  'sport_events',
 ] as const;
 
 /** Ordre enfants → parents (FK) pour un vidage sans orphelins. */
 const WIPE_ORDER: readonly string[] = [
+  'sport_events',
+  'sport_corrections',
+  'sport_sessions',
+  'sport_goals',
+  'sport_activities',
   'alcohol_events',
   'alcohol_weekly_goals',
   'alcohol_start_markers',
@@ -251,6 +262,7 @@ export async function importBackupPayload(
   });
 
   await migrate(db);
+  await sportRepo.ensureActivities(db);
   await kingdomRepo.ensureKingdomDefaults(db);
 }
 
