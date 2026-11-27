@@ -37,6 +37,7 @@ import { HELP_LINES, HEALTH_GUARDRAIL } from '@/src/data/content/helpLines';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { challengeTypeForTemplate } from '@/src/domain/models/challengeSession';
 import { presentHabitCard } from '@/src/domain/content/habitPresentation';
+import { VapeTracker } from '@/src/design-system/VapeTracker';
 
 const STATUS_FR: Record<TrackingStatus, string> = {
   unknown: 'Non renseigné',
@@ -323,6 +324,7 @@ export default function GoalsScreen() {
             <Text style={styles.categoryTitle}>
               {categoryDef.symbol} {categoryDef.label}
             </Text>
+            {categoryId === 'vape' ? <VapeTracker /> : null}
           </>
         ) : (
           <>

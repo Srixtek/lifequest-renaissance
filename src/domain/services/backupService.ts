@@ -33,10 +33,16 @@ const TABLES = [
   'renewable_quest_instances',
   'renewable_quest_history',
   'combat_victory_log',
+  'vape_main_sessions',
+  'vape_main_claims',
+  'vape_events',
 ] as const;
 
 /** Ordre enfants → parents (FK) pour un vidage sans orphelins. */
 const WIPE_ORDER: readonly string[] = [
+  'vape_events',
+  'vape_main_claims',
+  'vape_main_sessions',
   'adaptive_challenge_attempts',
   'adaptive_challenge_records',
   'adaptive_challenge_state',
