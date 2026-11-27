@@ -280,7 +280,14 @@ export type DeclareVapeResult =
       endedAt: string;
       cravingClosed: boolean;
     }
-  | { ok: false; code: 'no_active' | 'invalid_time' | 'clock_anomaly' | 'rewards_claimed' };
+  | { ok: false; code: 'no_active' | 'invalid_time' | 'clock_anomaly' | 'rewards_claimed' | 'craving_close_failed' };
+
+/** Échec MÉTIER détecté au milieu d'une transaction : force le rollback commun, puis le résultat est renvoyé tel quel. */
+class VapeTransactionAbort<R> extends Error {
+  constructor(readonly result: R) {
+    super('vape_transaction_abort');
+  }
+}
 
 /**
  * Un intervalle dont des paliers/bonus sont déjà validés (même à 0 or) ne peut pas être raccourci ni annulé si cela
@@ -329,8 +336,9 @@ async function declareVapeOnConn(tx: Db, now: Date, endedAtOpt?: Date): Promise<
     (endedAtOpt == null || Date.parse(attempt.startedAt) <= endMs)
   ) {
     const c = await closeVapeAdaptiveChallengeOnConn(tx, attempt.id, 'vaped');
-    cravingClosed = c.ok;
-    cravingAttemptId = c.ok ? attempt.id : null;
+    if (!c.ok) throw new VapeTransactionAbort<DeclareVapeResult>({ ok: false, code: 'craving_close_failed' });
+    cravingClosed = true;
+    cravingAttemptId = attempt.id;
   }
 
   await vapeMainRepo.insertEvent(tx, {
@@ -364,9 +372,14 @@ export async function declareVape(
 ): Promise<DeclareVapeResult> {
   const now = opts.now ?? new Date();
   let result: DeclareVapeResult = { ok: false, code: 'no_active' };
-  await db.withExclusiveTransactionAsync(async (tx) => {
-    result = await declareVapeOnConn(tx, now, opts.endedAt);
-  });
+  try {
+    await db.withExclusiveTransactionAsync(async (tx) => {
+      result = await declareVapeOnConn(tx, now, opts.endedAt);
+    });
+  } catch (err) {
+    if (err instanceof VapeTransactionAbort) return err.result as DeclareVapeResult;
+    throw err;
+  }
   return result;
 }
 
