@@ -1,5 +1,13 @@
 # Changelog
 
+## V1-02B — Alcool : journal, unités standard, chrono, objectif
+
+- Habitudes → Alcool : fiche avec verres standard du jour / 7 derniers jours / semaine civile, objectif hebdomadaire, chrono depuis la dernière boisson enregistrée (ou un départ explicitement confirmé), « Ajouter une boisson », historique par jour, correction et annulation tracées. Voir `docs/ALCOHOL_TRACKER.md`.
+- Calcul : `alcool_mg = volume_ml × degré/100 × 0,789 × quantité × 1000`, arrondi une seule fois, stocké en milligrammes entiers ; 1 verre standard = 10 000 mg. Totaux = somme des mg stockés.
+- Migration 013 (`alcohol_consumptions`, `alcohol_corrections`, `alcohol_zero_days`, `alcohol_start_markers`, `alcohol_weekly_goals`, `alcohol_events`) ; toutes les tables sont dans la sauvegarde `.lqbackup`.
+- Aucune récompense (XP, or, éclats) ni pénalité ; l'ancien template `alcohol_limit` est conservé et jamais additionné au journal.
+- Micro-correctif vape : `declareVape` renvoie `craving_close_failed` et annule toute la transaction si la clôture de l'envie échoue sans exception (plus de clôture silencieuse du seul chrono).
+
 ## V1-02A-R — Vape : intégrité (correctif, pas de migration)
 
 - Paliers à 0 or : la validation reste proposée quand le plafond du jour est atteint (« palier validé, 0 or (plafond atteint) »), état persisté, jamais d'or ultérieur ; aucun bonus de record promis si le plafond l'interdit.

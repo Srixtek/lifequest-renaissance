@@ -36,10 +36,22 @@ const TABLES = [
   'vape_main_sessions',
   'vape_main_claims',
   'vape_events',
+  'alcohol_consumptions',
+  'alcohol_corrections',
+  'alcohol_zero_days',
+  'alcohol_start_markers',
+  'alcohol_weekly_goals',
+  'alcohol_events',
 ] as const;
 
 /** Ordre enfants → parents (FK) pour un vidage sans orphelins. */
 const WIPE_ORDER: readonly string[] = [
+  'alcohol_events',
+  'alcohol_weekly_goals',
+  'alcohol_start_markers',
+  'alcohol_zero_days',
+  'alcohol_corrections',
+  'alcohol_consumptions',
   'vape_events',
   'vape_main_claims',
   'vape_main_sessions',

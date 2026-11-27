@@ -38,6 +38,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { challengeTypeForTemplate } from '@/src/domain/models/challengeSession';
 import { presentHabitCard } from '@/src/domain/content/habitPresentation';
 import { VapeTracker } from '@/src/design-system/VapeTracker';
+import { AlcoholTracker } from '@/src/design-system/AlcoholTracker';
 
 const STATUS_FR: Record<TrackingStatus, string> = {
   unknown: 'Non renseigné',
@@ -325,6 +326,7 @@ export default function GoalsScreen() {
               {categoryDef.symbol} {categoryDef.label}
             </Text>
             {categoryId === 'vape' ? <VapeTracker /> : null}
+            {categoryId === 'alcool' ? <AlcoholTracker /> : null}
           </>
         ) : (
           <>
@@ -378,7 +380,7 @@ export default function GoalsScreen() {
           </View>
         ) : null}
 
-        {(mode === 'challenges' || inCategory) && goalsToRender.length === 0 ? (
+        {(mode === 'challenges' || (inCategory && categoryId !== 'alcool')) && goalsToRender.length === 0 ? (
           <EmptyState
             title={mode === 'track' ? 'Aucune habitude ici' : 'Aucun défi disponible'}
             hint={
