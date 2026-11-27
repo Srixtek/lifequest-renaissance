@@ -374,6 +374,26 @@ suite('V1-02A-R — intégrité du tracker vape (SQLite réel)', () => {
       expect(await declareVape(t.db, { now: at(HOUR) })).toMatchObject({ ok: true, cravingClosed: true });
     });
 
+    test('échec MÉTIER (sans exception SQLite) de clôture de l\'envie : rollback commun, chrono toujours actif', async () => {
+      const id = await startOk(t.db, T0);
+      const c = await declareCraving(t.db, 'delay_craving');
+      if (!c.ok) throw new Error('craving');
+      // Envie « running » mais sans session de défi : closeVapeAdaptiveChallengeOnConn renvoie { ok: false } sans lever.
+      t.raw.exec(`UPDATE adaptive_challenge_attempts SET challenge_session_id = NULL WHERE id = '${c.attempt.id}'`);
+
+      const r = await declareVape(t.db, { now: at(HOUR) });
+      expect(r).toEqual({ ok: false, code: 'craving_close_failed' });
+      expect(await sessionStatus(t.db, id)).toMatchObject({ status: 'active', ended_at: null, duration_sec: null });
+      const att = await t.db.getFirstAsync<{ outcome: string }>(`SELECT outcome FROM adaptive_challenge_attempts WHERE id = ?`, c.attempt.id);
+      expect(att?.outcome).toBe('running');
+      expect(await t.db.getAllAsync(`SELECT id FROM vape_events WHERE kind = 'main_close'`)).toHaveLength(0);
+
+      // Réparer l'état incohérent : la déclaration réussit alors normalement.
+      const cs = await t.db.getFirstAsync<{ id: string }>(`SELECT id FROM challenge_sessions ORDER BY rowid DESC LIMIT 1`);
+      t.raw.exec(`UPDATE adaptive_challenge_attempts SET challenge_session_id = '${cs!.id}' WHERE id = '${c.attempt.id}'`);
+      expect(await declareVape(t.db, { now: at(HOUR) })).toMatchObject({ ok: true, cravingClosed: true });
+    });
+
     test('interruption pendant « J\'ai cédé » : ni l\'envie ni le chrono ne changent', async () => {
       const id = await startOk(t.db, T0);
       const c = await declareCraving(t.db, 'breathing');

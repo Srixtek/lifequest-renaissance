@@ -139,7 +139,9 @@ export function VapeTracker() {
               ? 'L\'horloge du téléphone semble décalée : annule ce chrono puis relance-le.'
               : r.code === 'rewards_claimed'
                 ? REWARDS_CLAIMED_MSG
-                : 'Heure incohérente (avant le départ ou dans le futur).',
+                : r.code === 'craving_close_failed'
+                  ? 'Rien n\'a été modifié : l\'envie en cours n\'a pas pu être clôturée. Réessaie.'
+                  : 'Heure incohérente (avant le départ ou dans le futur).',
         );
         return;
       }
