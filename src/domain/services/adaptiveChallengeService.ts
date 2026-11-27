@@ -38,7 +38,14 @@ export type StartAdaptiveResult =
   | { ok: false; code: 'category_inactive' | 'already_running' | 'session_busy' | 'main_chrono_active' };
 
 export type CloseAdaptiveResult =
-  | { ok: true; attempt: AdaptiveChallengeAttempt; tierMessage: string | null; goldGranted: boolean }
+  | {
+      ok: true;
+      attempt: AdaptiveChallengeAttempt;
+      tierMessage: string | null;
+      goldGranted: boolean;
+      /** Or réellement crédité (peut être inférieur à la récompense nominale si le plafond du jour approche). */
+      goldAmount: number;
+    }
   | { ok: false; code: 'not_running' | 'not_found' | 'already_closed' | 'session_error' };
 
 export interface VapeAdaptiveDashboard {
@@ -219,35 +226,35 @@ async function maybeGrantTierGold(
   tx: Db,
   attempt: AdaptiveChallengeAttempt,
   success: boolean,
-): Promise<boolean> {
-  if (!success) return false;
+): Promise<number> {
+  if (!success) return 0;
   const track = tierTrackForFormat(attempt.format);
-  if (!track) return false;
+  if (!track) return 0;
   const key = `adaptive:vape:${attempt.format}:tier:${attempt.tierIndex}:gold`;
   const amount = Math.min(VAPE_TIER_GOLD_REWARD, await sharedGoldRemainingToday(tx));
-  if (amount <= 0) return false;
+  if (amount <= 0) return 0;
   const r = await rpgRepo.addGold(
     tx,
     amount,
     `Palier vape (${attempt.format}) ${attempt.tierIndex + 1} confirmé`,
     key,
   );
-  return r === 'inserted';
+  return r === 'inserted' ? amount : 0;
 }
 
-async function maybeGrantRecordMilestoneGold(tx: Db, durationSec: number): Promise<boolean> {
+async function maybeGrantRecordMilestoneGold(tx: Db, durationSec: number): Promise<number> {
   const milestone = highestRecordMilestoneMinutes(durationSec);
-  if (milestone == null) return false;
+  if (milestone == null) return 0;
   const key = `adaptive:vape:record:milestone:${milestone}:gold`;
   const amount = Math.min(VAPE_TIER_GOLD_REWARD, await sharedGoldRemainingToday(tx));
-  if (amount <= 0) return false;
+  if (amount <= 0) return 0;
   const r = await rpgRepo.addGold(
     tx,
     amount,
     `Record vape — palier ${milestone} min`,
     key,
   );
-  return r === 'inserted';
+  return r === 'inserted' ? amount : 0;
 }
 
 function successFromSession(
@@ -270,6 +277,103 @@ function successFromSession(
   return durationSec >= targetSec;
 }
 
+/**
+ * Clôture d'une tentative DANS une transaction déjà ouverte par l'appelant (aucune transaction imbriquée).
+ * Permet de clôturer chrono principal et envie dans la même unité atomique.
+ */
+export async function closeVapeAdaptiveChallengeOnConn(
+  tx: Db,
+  attemptId: string,
+  mode: 'completed' | 'vaped' | 'unknown',
+): Promise<CloseAdaptiveResult> {
+  const attempt = await adaptiveRepo.getAttemptById(tx, attemptId);
+  if (!attempt || attempt.outcome !== 'running') {
+    return { ok: false, code: attempt ? 'already_closed' : 'not_found' };
+  }
+  if (!attempt.challengeSessionId) {
+    return { ok: false, code: 'session_error' };
+  }
+  const sessionClose =
+    mode === 'vaped'
+      ? await interruptVapeChallengeOnConn(tx, attempt.challengeSessionId)
+      : mode === 'completed'
+        ? await completeVapeChallengeOnConn(tx, attempt.challengeSessionId)
+        : await closeChallengeSessionOnConn(tx, attempt.challengeSessionId, 'interrupted');
+
+  if (!sessionClose.ok) {
+    return { ok: false, code: 'session_error' };
+  }
+  const durationSec = Math.max(0, sessionClose.session.durationSec);
+  const completed = sessionClose.session.state === 'completed';
+  let breathingCompleted = false;
+  let copingSessionId: string | null = null;
+
+  if (attempt.format === 'breathing') {
+    const breathDone = mode === 'completed' && completed && durationSec >= VAPE_BREATHING_SECONDS;
+    const cope = await recordBreathingSessionOnConn(
+      tx,
+      breathDone ? VAPE_BREATHING_SECONDS : durationSec,
+      breathDone,
+      { vapeAttemptId: attemptId },
+    );
+    copingSessionId = cope.copingSessionId;
+    breathingCompleted = breathDone;
+    await adaptiveRepo.setAttemptCopingSessionId(tx, attemptId, copingSessionId);
+  }
+
+  const success =
+    mode === 'unknown'
+      ? false
+      : successFromSession(
+          attempt.format,
+          durationSec,
+          attempt.targetDurationSec,
+          completed,
+          mode,
+          breathingCompleted,
+        );
+  const outcome =
+    mode === 'unknown' ? 'unknown' : attempt.format === 'record' && mode === 'vaped' ? 'failure' : success
+      ? 'success'
+      : 'failure';
+  const ended = nowIso();
+  const closed = await adaptiveRepo.closeAttempt(tx, attemptId, {
+    outcome,
+    declaredDurationSec: durationSec,
+    endedAt: ended,
+    updatedAt: ended,
+  });
+  if (!closed) {
+    return { ok: false, code: 'already_closed' };
+  }
+
+  const mayUpdateRecord =
+    durationSec > 0 &&
+    mode !== 'unknown' &&
+    (attempt.format === 'record'
+      ? mode === 'completed' || mode === 'vaped'
+      : success && attempt.format === 'interval');
+  if (mayUpdateRecord) {
+    await adaptiveRepo.upsertRecordIfBetter(tx, {
+      habitCategory: VAPE_HABIT_CATEGORY,
+      format: attempt.format === 'record' ? 'record' : 'interval',
+      bestDurationSec: durationSec,
+      attemptId,
+      achievedAt: ended,
+    });
+  }
+
+  const updated = (await adaptiveRepo.getAttemptById(tx, attemptId))!;
+  const tierMessage = await applyTierAfterClose(tx, updated);
+  let goldAmount = 0;
+  if (attempt.format === 'record' && mode !== 'unknown') {
+    goldAmount = await maybeGrantRecordMilestoneGold(tx, durationSec);
+  } else if (attempt.format !== 'record') {
+    goldAmount = await maybeGrantTierGold(tx, updated, success);
+  }
+  return { ok: true, attempt: updated, tierMessage, goldGranted: goldAmount > 0, goldAmount };
+}
+
 export async function closeVapeAdaptiveChallenge(
   db: Db,
   attemptId: string,
@@ -277,96 +381,7 @@ export async function closeVapeAdaptiveChallenge(
 ): Promise<CloseAdaptiveResult> {
   let result: CloseAdaptiveResult = { ok: false, code: 'not_found' };
   await db.withExclusiveTransactionAsync(async (tx) => {
-    const attempt = await adaptiveRepo.getAttemptById(tx, attemptId);
-    if (!attempt || attempt.outcome !== 'running') {
-      result = { ok: false, code: attempt ? 'already_closed' : 'not_found' };
-      return;
-    }
-    if (!attempt.challengeSessionId) {
-      result = { ok: false, code: 'session_error' };
-      return;
-    }
-    const sessionClose =
-      mode === 'vaped'
-        ? await interruptVapeChallengeOnConn(tx, attempt.challengeSessionId)
-        : mode === 'completed'
-          ? await completeVapeChallengeOnConn(tx, attempt.challengeSessionId)
-          : await closeChallengeSessionOnConn(tx, attempt.challengeSessionId, 'interrupted');
-
-    if (!sessionClose.ok) {
-      result = { ok: false, code: 'session_error' };
-      return;
-    }
-    const durationSec = Math.max(0, sessionClose.session.durationSec);
-    const completed = sessionClose.session.state === 'completed';
-    let breathingCompleted = false;
-    let copingSessionId: string | null = null;
-
-    if (attempt.format === 'breathing') {
-      const breathDone = mode === 'completed' && completed && durationSec >= VAPE_BREATHING_SECONDS;
-      const cope = await recordBreathingSessionOnConn(
-        tx,
-        breathDone ? VAPE_BREATHING_SECONDS : durationSec,
-        breathDone,
-        { vapeAttemptId: attemptId },
-      );
-      copingSessionId = cope.copingSessionId;
-      breathingCompleted = breathDone;
-      await adaptiveRepo.setAttemptCopingSessionId(tx, attemptId, copingSessionId);
-    }
-
-    const success =
-      mode === 'unknown'
-        ? false
-        : successFromSession(
-            attempt.format,
-            durationSec,
-            attempt.targetDurationSec,
-            completed,
-            mode,
-            breathingCompleted,
-          );
-    const outcome =
-      mode === 'unknown' ? 'unknown' : attempt.format === 'record' && mode === 'vaped' ? 'failure' : success
-        ? 'success'
-        : 'failure';
-    const ended = nowIso();
-    const closed = await adaptiveRepo.closeAttempt(tx, attemptId, {
-      outcome,
-      declaredDurationSec: durationSec,
-      endedAt: ended,
-      updatedAt: ended,
-    });
-    if (!closed) {
-      result = { ok: false, code: 'already_closed' };
-      return;
-    }
-
-    const mayUpdateRecord =
-      durationSec > 0 &&
-      mode !== 'unknown' &&
-      (attempt.format === 'record'
-        ? mode === 'completed' || mode === 'vaped'
-        : success && attempt.format === 'interval');
-    if (mayUpdateRecord) {
-      await adaptiveRepo.upsertRecordIfBetter(tx, {
-        habitCategory: VAPE_HABIT_CATEGORY,
-        format: attempt.format === 'record' ? 'record' : 'interval',
-        bestDurationSec: durationSec,
-        attemptId,
-        achievedAt: ended,
-      });
-    }
-
-    const updated = (await adaptiveRepo.getAttemptById(tx, attemptId))!;
-    const tierMessage = await applyTierAfterClose(tx, updated);
-    let goldGranted = false;
-    if (attempt.format === 'record' && mode !== 'unknown') {
-      goldGranted = await maybeGrantRecordMilestoneGold(tx, durationSec);
-    } else if (attempt.format !== 'record') {
-      goldGranted = await maybeGrantTierGold(tx, updated, success);
-    }
-    result = { ok: true, attempt: updated, tierMessage, goldGranted };
+    result = await closeVapeAdaptiveChallengeOnConn(tx, attemptId, mode);
   });
   return result;
 }
