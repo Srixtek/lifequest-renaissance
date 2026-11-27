@@ -135,6 +135,14 @@ export default function CampScreen() {
     <TabScrollView safeTop flushHorizontal>
         <View>
           <ForestScene />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Ouvrir les paramètres"
+            onPress={() => router.push('/settings')}
+            style={({ pressed }) => [styles.settingsBtn, pressed && { opacity: 0.8 }]}
+          >
+            <Text style={styles.settingsBtnText}>⚙ Paramètres</Text>
+          </Pressable>
           <View style={styles.heroOverlay}>
             <Text style={styles.realm}>Eloria</Text>
             <Text style={styles.pseudo}>{profile?.pseudo ?? 'Voyageur'}</Text>
@@ -204,7 +212,6 @@ export default function CampScreen() {
           </View>
           <View style={styles.quickRow}>
             <SecondaryLink label="Journal" onPress={() => router.push('/journal')} />
-            <SecondaryLink label="Paramètres" onPress={() => router.push('/settings')} />
             {vapeGoal ? (
               <SecondaryLink label="Défis vape" onPress={() => router.push('/tools/vape-adaptive')} />
             ) : null}
@@ -247,6 +254,19 @@ function ResourceChip({ label, value }: { label: string; value: string }) {
 }
 
 const styles = StyleSheet.create({
+  settingsBtn: {
+    position: 'absolute',
+    top: spacing.sm,
+    right: spacing.lg,
+    minHeight: 44,
+    paddingHorizontal: spacing.md,
+    justifyContent: 'center',
+    borderRadius: 22,
+    backgroundColor: 'rgba(7, 15, 14, 0.75)',
+    borderWidth: 1,
+    borderColor: colors.lineBright,
+  },
+  settingsBtnText: { ...typography.caption, color: colors.ink, fontWeight: '700' },
   heroOverlay: {
     marginTop: -spacing.sm,
     paddingTop: 0,

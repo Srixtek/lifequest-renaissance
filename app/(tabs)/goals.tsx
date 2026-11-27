@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
-import { Body, Button, Chip, Field, SectionTitle, TabScrollView } from '@/src/design-system/ui';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { BackHandler, Pressable, View, Text, StyleSheet } from 'react-native';
+import { Body, Button, Chip, Field, TabScrollView } from '@/src/design-system/ui';
 import { CollapsibleSection } from '@/src/design-system/CollapsibleSection';
 import { colors, spacing, typography } from '@/src/design-system/theme';
 import { EmptyState, QuestCard } from '@/src/design-system/QuestCard';
@@ -10,21 +10,23 @@ import { getDb } from '@/src/data/db/client';
 import { confirmGoalDay, logGoalNumeric } from '@/src/domain/services/trackingService';
 import {
   getVersionForDate,
-  insertGoal,
   listTrackingInRange,
   setGoalStatus,
 } from '@/src/data/db/repositories/goalRepo';
-import { GOAL_KIND_LABELS, GOAL_TEMPLATES } from '@/src/data/content/goalTemplates';
-import { createId } from '@/src/utils/id';
-import { nowIso } from '@/src/domain/rules/dates';
-import type { GoalTier } from '@/src/domain/models/types';
+import { GOAL_TEMPLATES } from '@/src/data/content/goalTemplates';
+import {
+  HABIT_CATEGORIES,
+  HABIT_CATEGORY_BY_ID,
+  activeCountLabel,
+  groupGoalsByCategory,
+} from '@/src/data/content/habitCategories';
 import { HabitSetupFlow } from '@/src/design-system/HabitSetupFlow';
 import { scheduleVersionUpdate } from '@/src/domain/services/goalLifecycleService';
 import {
   countWeeklySuccessDays,
   weekBoundsMondaySunday,
 } from '@/src/domain/rules/weeklyTracking';
-import type { GoalDefinition, GoalKind, TrackingStatus } from '@/src/domain/models/types';
+import type { GoalDefinition, GoalKind, HabitCategoryId, TrackingStatus } from '@/src/domain/models/types';
 import {
   kindRequiresNumericTarget,
   parseLogValue,
@@ -32,12 +34,9 @@ import {
   validateCreationTarget,
 } from '@/src/domain/rules/trackingStatus';
 import { HELP_LINES, HEALTH_GUARDRAIL } from '@/src/data/content/helpLines';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { challengeTypeForTemplate } from '@/src/domain/models/challengeSession';
-import {
-  customCreationTargetPlaceholder,
-  presentHabitCard,
-} from '@/src/domain/content/habitPresentation';
+import { presentHabitCard } from '@/src/domain/content/habitPresentation';
 
 const STATUS_FR: Record<TrackingStatus, string> = {
   unknown: 'Non renseigné',
@@ -46,8 +45,6 @@ const STATUS_FR: Record<TrackingStatus, string> = {
   miss: 'Écart',
   paused: 'En pause',
 };
-
-const CUSTOM_KINDS: GoalKind[] = ['habit', 'abstinence', 'limit', 'reduce', 'duration', 'quantity'];
 
 function displayStatus(goal: GoalDefinition, status: TrackingStatus, hasValue: boolean): string {
   if (goal.followWithoutXp && usesNumericLog(goal.kind)) {
@@ -80,11 +77,7 @@ export default function GoalsScreen() {
   const [editTargetDraft, setEditTargetDraft] = useState<Record<string, string>>({});
   const [actionBusy, setActionBusy] = useState(false);
   const actionLockRef = useRef(false);
-  const [customTitle, setCustomTitle] = useState('');
-  const [customKind, setCustomKind] = useState<GoalKind>('habit');
-  const [customUnit, setCustomUnit] = useState('');
-  const [customTarget, setCustomTarget] = useState('');
-  const [customTier, setCustomTier] = useState<GoalTier>('normal');
+  const [categoryId, setCategoryId] = useState<HabitCategoryId | null>(null);
   const [mode, setMode] = useState<'track' | 'challenges'>('track');
   const [detailsOpen, setDetailsOpen] = useState<Record<string, boolean>>({});
 
@@ -95,6 +88,19 @@ export default function GoalsScreen() {
   const activeGoalIdsKey = useMemo(
     () => activeGoals.map((g) => g.id).sort().join('\0'),
     [activeGoals],
+  );
+
+  const goalsByCategory = useMemo(() => groupGoalsByCategory(activeGoals), [activeGoals]);
+
+  useFocusEffect(
+    useCallback(() => {
+      const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+        if (categoryId == null) return false;
+        setCategoryId(null);
+        return true;
+      });
+      return () => sub.remove();
+    }, [categoryId]),
   );
 
   const templateNotes = useMemo(() => {
@@ -252,59 +258,6 @@ export default function GoalsScreen() {
     });
   };
 
-  const createCustom = async () => {
-    await runAction(async () => {
-      const title = customTitle.trim();
-      if (!title) {
-        showFeedback('Donne un nom à l\'habitude.');
-        return;
-      }
-      const targetCheck = validateCreationTarget(customKind, customTarget);
-      if (!targetCheck.ok) {
-        showFeedback(targetCheck.error);
-        return;
-      }
-      const db = await getDb();
-      const goalId = createId('goal');
-      const createdAt = nowIso();
-      const unit = customUnit.trim() || null;
-      await db.withExclusiveTransactionAsync(async (tx) => {
-        await insertGoal(
-          tx,
-          {
-            id: goalId,
-            title,
-            kind: customKind,
-            unit,
-            weight: 1,
-            status: 'active',
-            templateId: null,
-            sensitive: false,
-            followWithoutXp: false,
-            createdAt,
-          },
-          {
-            id: createId('gver'),
-            goalId,
-            version: 1,
-            tier: customTier,
-            targetValue: targetCheck.value,
-            scheduleKind: 'daily',
-            weeklyTargetCount: null,
-            notes: null,
-            effectiveFrom: createdAt.slice(0, 10),
-            effectiveTo: null,
-          },
-        );
-      });
-      setCustomTitle('');
-      setCustomUnit('');
-      setCustomTarget('');
-      await refresh();
-      showFeedback(`Habitude personnalisée « ${title} » créée.`);
-    });
-  };
-
   const applyTargetEdit = async (goalId: string, kind: GoalKind) => {
     await runAction(async () => {
       const raw = editTargetDraft[goalId] ?? '';
@@ -349,32 +302,86 @@ export default function GoalsScreen() {
     setDetailsOpen((d) => ({ ...d, [goalId]: !d[goalId] }));
   };
 
-  const goalsToRender = mode === 'challenges' ? challengeGoals : activeGoals;
+  const inCategory = mode === 'track' && categoryId != null;
+  const categoryDef = categoryId ? HABIT_CATEGORY_BY_ID[categoryId] : null;
+  const goalsToRender =
+    mode === 'challenges' ? challengeGoals : categoryId ? goalsByCategory[categoryId] : [];
 
   return (
     <TabScrollView>
-        <Text style={styles.dateLine}>{today}</Text>
-        <Body muted>
-          Vide ≠ zéro. Les jours sans saisie restent « non renseignés » (0 XP). Corrige librement dans la journée.
-        </Body>
+        {inCategory && categoryDef ? (
+          <>
+            <View style={styles.topRow}>
+              <Button
+                label="← Habitudes"
+                variant="secondary"
+                compact
+                onPress={() => setCategoryId(null)}
+              />
+              <Button label="Paramètres" variant="ghost" compact onPress={() => router.push('/settings')} />
+            </View>
+            <Text style={styles.categoryTitle}>
+              {categoryDef.symbol} {categoryDef.label}
+            </Text>
+          </>
+        ) : (
+          <>
+            <View style={styles.topRow}>
+              <Text style={styles.dateLine}>{today}</Text>
+              <Button label="Paramètres" variant="ghost" compact onPress={() => router.push('/settings')} />
+            </View>
+            <Body muted>
+              Vide ≠ zéro : un jour sans saisie reste « non renseigné » (0 XP). Corrige librement dans la journée.
+            </Body>
+          </>
+        )}
         {flash ? <Text style={styles.flash}>{flash}</Text> : null}
 
-        <View style={styles.modeRow}>
-          <Chip label="Suivre mes habitudes" selected={mode === 'track'} onPress={() => setMode('track')} />
-          <Chip label="Relever des défis" selected={mode === 'challenges'} onPress={() => setMode('challenges')} />
-        </View>
-
-        {mode === 'track' ? (
-          <Text style={styles.sectionHeading}>Mes habitudes actives</Text>
-        ) : (
-          <Text style={styles.sectionHeading}>Défis liés à tes habitudes</Text>
+        {inCategory ? null : (
+          <View style={styles.modeRow}>
+            <Chip label="Suivre mes habitudes" selected={mode === 'track'} onPress={() => setMode('track')} />
+            <Chip label="Relever des défis" selected={mode === 'challenges'} onPress={() => setMode('challenges')} />
+          </View>
         )}
-        {goalsToRender.length === 0 ? (
+
+        {mode === 'challenges' ? (
+          <Text style={styles.sectionHeading}>Défis liés à tes habitudes</Text>
+        ) : null}
+
+        {mode === 'track' && !inCategory ? (
+          <View style={styles.grid}>
+            {HABIT_CATEGORIES.map((c) => {
+              const count = goalsByCategory[c.id].length;
+              return (
+                <Pressable
+                  key={c.id}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${c.label}, ${activeCountLabel(count)}`}
+                  onPress={() => setCategoryId(c.id)}
+                  style={({ pressed }) => [
+                    styles.tile,
+                    { borderColor: c.color },
+                    count === 0 && styles.tileEmpty,
+                    pressed && { opacity: 0.85 },
+                  ]}
+                >
+                  <Text style={styles.tileSymbol}>{c.symbol}</Text>
+                  <Text style={[styles.tileName, { color: c.color }]} numberOfLines={1}>
+                    {c.label}
+                  </Text>
+                  <Text style={styles.tileCount}>{activeCountLabel(count)}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        ) : null}
+
+        {(mode === 'challenges' || inCategory) && goalsToRender.length === 0 ? (
           <EmptyState
-            title={mode === 'track' ? "Pas encore d'habitude" : 'Aucun défi disponible'}
+            title={mode === 'track' ? 'Aucune habitude ici' : 'Aucun défi disponible'}
             hint={
               mode === 'track'
-                ? 'Déplie « Ajouter une habitude » pour commencer.'
+                ? 'Ajoute un modèle guidé depuis l\'écran Habitudes, ou crée la tienne dans Paramètres.'
                 : 'Active une habitude avec défi (ex. vape) depuis l\'onglet Suivre.'
             }
           />
@@ -586,49 +593,10 @@ export default function GoalsScreen() {
           );
         })}
 
-        {mode === 'track' ? (
-          <CollapsibleSection title="Ajouter une habitude" hint="Modèles guidés et création personnalisée">
+        {mode === 'track' && !inCategory ? (
+          <CollapsibleSection title="Ajouter une habitude" hint="Modèles guidés ; création libre dans Paramètres">
             <Body muted>Catégorie → intention → cible → valider.</Body>
             <HabitSetupFlow disabled={actionBusy} onFeedback={showFeedback} onDone={refresh} />
-            <CollapsibleSection title="Habitude personnalisée" hint="Nom, type, unité et cible">
-              <Field value={customTitle} onChangeText={setCustomTitle} placeholder="Nom" />
-              <Body muted>Type</Body>
-              <View style={styles.row}>
-                {CUSTOM_KINDS.map((k) => (
-                  <Chip
-                    key={k}
-                    label={GOAL_KIND_LABELS[k]}
-                    selected={customKind === k}
-                    onPress={() => {
-                      setCustomKind(k);
-                      if (!kindRequiresNumericTarget(k)) setCustomTarget('');
-                    }}
-                  />
-                ))}
-              </View>
-              <Field value={customUnit} onChangeText={setCustomUnit} placeholder="Unité (facultatif)" />
-              {kindRequiresNumericTarget(customKind) ? (
-                <Field
-                  value={customTarget}
-                  onChangeText={setCustomTarget}
-                  placeholder={customCreationTargetPlaceholder(customKind)}
-                  keyboardType="decimal-pad"
-                />
-              ) : (
-                <Body muted>Pas de cible numérique pour ce type.</Body>
-              )}
-              <View style={styles.row}>
-                {(['minimal', 'normal', 'ambitieux'] as GoalTier[]).map((tier) => (
-                  <Chip
-                    key={tier}
-                    label={tier}
-                    selected={customTier === tier}
-                    onPress={() => setCustomTier(tier)}
-                  />
-                ))}
-              </View>
-              <Button label="Créer l'habitude" onPress={() => void createCustom()} disabled={actionBusy} />
-            </CollapsibleSection>
           </CollapsibleSection>
         ) : null}
 
@@ -643,7 +611,30 @@ export default function GoalsScreen() {
 }
 
 const styles = StyleSheet.create({
-  dateLine: { ...typography.caption, color: colors.gold, marginBottom: spacing.sm, marginTop: spacing.xs },
+  dateLine: { ...typography.caption, color: colors.gold },
+  topRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.sm,
+    marginTop: spacing.xs,
+  },
+  categoryTitle: { ...typography.title, color: colors.ink, marginBottom: spacing.sm },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginTop: spacing.xs },
+  tile: {
+    width: '48%',
+    minHeight: 104,
+    marginBottom: spacing.sm,
+    padding: spacing.md,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    backgroundColor: colors.card,
+    justifyContent: 'center',
+  },
+  tileEmpty: { opacity: 0.6 },
+  tileSymbol: { fontSize: 28, marginBottom: 2 },
+  tileName: { ...typography.subtitle },
+  tileCount: { ...typography.caption, color: colors.muted, marginTop: 2 },
   sectionHeading: {
     ...typography.subtitle,
     color: colors.ink,

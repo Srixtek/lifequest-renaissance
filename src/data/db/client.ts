@@ -9,6 +9,7 @@ import migration007 from './migrations/007_vape_reliability';
 import migration008 from './migrations/008_kingdom_bastion';
 import migration009 from './migrations/009_combat_v2';
 import migration010 from './migrations/010_renewable_quests';
+import migration011 from './migrations/011_habit_categories';
 
 export type Db = SQLite.SQLiteDatabase;
 
@@ -23,6 +24,7 @@ const MIGRATIONS: Array<{ version: number; sql: string }> = [
   { version: 8, sql: migration008 },
   { version: 9, sql: migration009 },
   { version: 10, sql: migration010 },
+  { version: 11, sql: migration011 },
 ];
 
 let dbPromise: Promise<Db> | null = null;

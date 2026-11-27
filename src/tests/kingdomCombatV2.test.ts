@@ -73,7 +73,7 @@ suite('006B — combat visuel 2.0', () => {
   });
 
   test('migration 008→009 : power → heavy et concentration par défaut', async () => {
-    await t.db.runAsync(`DELETE FROM schema_migrations WHERE version >= 9`);
+    await t.db.runAsync(`DELETE FROM schema_migrations WHERE version IN (9, 10)`);
     await t.db.runAsync(`DROP TABLE kingdom_combat`);
     await t.db.execAsync(`
       CREATE TABLE kingdom_combat (

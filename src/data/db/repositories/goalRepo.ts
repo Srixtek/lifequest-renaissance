@@ -1,4 +1,5 @@
 import type { Db } from '../client';
+import { categoryForTemplate, isHabitCategoryId } from '../../content/habitCategories';
 import type { SqlRunner } from '../sqlRunner';
 import type { GoalDefinition, GoalVersion, TrackingEvent, TrackingStatus } from '../../../domain/models/types';
 
@@ -23,6 +24,7 @@ function mapGoal(r: any): GoalDefinition {
     templateId: r.template_id,
     sensitive: !!r.sensitive,
     followWithoutXp: !!r.follow_without_xp,
+    categoryId: isHabitCategoryId(r.category_id) ? r.category_id : null,
     createdAt: r.created_at,
   };
 }
@@ -34,8 +36,8 @@ export async function insertGoal(
 ): Promise<void> {
   await db.runAsync(
     `INSERT INTO goal_definitions
-     (id, title, kind, unit, weight, status, template_id, sensitive, follow_without_xp, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     (id, title, kind, unit, weight, status, template_id, sensitive, follow_without_xp, category_id, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     goal.id,
     goal.title,
     goal.kind,
@@ -45,6 +47,7 @@ export async function insertGoal(
     goal.templateId,
     goal.sensitive ? 1 : 0,
     goal.followWithoutXp ? 1 : 0,
+    goal.categoryId ?? (goal.templateId ? categoryForTemplate(goal.templateId) : null),
     goal.createdAt,
   );
   await db.runAsync(

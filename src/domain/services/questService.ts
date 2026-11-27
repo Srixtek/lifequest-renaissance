@@ -2,7 +2,7 @@ import type { Db } from '../../data/db/client';
 import type { SqlRunner } from '../../data/db/sqlRunner';
 import * as questRepo from '../../data/db/repositories/questRepo';
 import * as rpgRepo from '../../data/db/repositories/rpgRepo';
-import { MAX_ACCEPTED_QUESTS, QUESTS, QUEST_BY_ID, type QuestDef } from '../../data/content/quests';
+import { MAX_ACCEPTED_QUESTS, QUESTS, QUEST_BY_ID, RETIRED_QUEST_IDS, type QuestDef } from '../../data/content/quests';
 import { createId } from '../../utils/id';
 import { evaluateQuestProof, type QuestProgress } from './questEvidence';
 
@@ -27,6 +27,7 @@ export interface QuestBoard {
 
 export type QuestActionCode =
   | 'unknown_quest'
+  | 'retired'
   | 'already_accepted'
   | 'already_claimed'
   | 'max_accepted'
@@ -45,6 +46,7 @@ export const questRewardKey = (questId: string) => `quest:${questId}:reward`;
 
 const MESSAGES: Record<QuestActionCode, string> = {
   unknown_quest: 'Cette quête n\'existe pas.',
+  retired: 'Cette quête historique n\'est plus proposée.',
   already_accepted: 'Cette quête est déjà dans ton carnet.',
   already_claimed: 'Récompense déjà réclamée pour cette quête.',
   max_accepted: `Ton carnet est plein (${MAX_ACCEPTED_QUESTS} quêtes). Termine ou abandonne une quête pour en accepter une autre.`,
@@ -71,16 +73,19 @@ export async function getQuestBoard(db: Conn): Promise<QuestBoard> {
         claimedAt: row.claimedAt,
       });
     } else if (row?.status === 'accepted' && row.acceptedAt) {
-      acceptedCount += 1;
       const progress = await evaluateQuestProof(db, def, row.acceptedAt);
+      const ready = progress.current >= progress.target;
+      // Quête retirée : visible seulement si sa preuve est déjà atteinte (or légitime à réclamer) ; jamais d'emplacement occupé.
+      if (def.retired && !ready) continue;
+      if (!def.retired) acceptedCount += 1;
       entries.push({
         def,
-        state: progress.current >= progress.target ? 'ready' : 'accepted',
+        state: ready ? 'ready' : 'accepted',
         progress,
         acceptedAt: row.acceptedAt,
         claimedAt: null,
       });
-    } else {
+    } else if (!def.retired) {
       entries.push({
         def,
         state: 'available',
@@ -96,6 +101,7 @@ export async function getQuestBoard(db: Conn): Promise<QuestBoard> {
 export async function acceptQuest(db: Db, questId: string, now: Date = new Date()): Promise<QuestActionResult> {
   const def = QUEST_BY_ID[questId];
   if (!def) return fail('unknown_quest');
+  if (def.retired) return fail('retired');
   let result: QuestActionResult = fail('unknown_quest');
   await db.withExclusiveTransactionAsync(async (tx) => {
     const row = await questRepo.getRow(tx, questId);
@@ -107,7 +113,7 @@ export async function acceptQuest(db: Db, questId: string, now: Date = new Date(
       result = fail('already_accepted');
       return;
     }
-    if ((await questRepo.countAccepted(tx)) >= MAX_ACCEPTED_QUESTS) {
+    if ((await questRepo.countAccepted(tx, RETIRED_QUEST_IDS)) >= MAX_ACCEPTED_QUESTS) {
       result = fail('max_accepted');
       return;
     }

@@ -38,9 +38,14 @@ export async function getRow(db: Conn, questId: string): Promise<QuestRow | null
   return r ? mapRow(r) : null;
 }
 
-export async function countAccepted(db: Conn): Promise<number> {
+/** Quêtes acceptées occupant un emplacement du carnet (les quêtes retirées n'en occupent jamais). */
+export async function countAccepted(db: Conn, excludeQuestIds: readonly string[] = []): Promise<number> {
+  const placeholders = excludeQuestIds.map(() => '?').join(', ');
   const r = await db.getFirstAsync<{ c: number }>(
-    `SELECT COUNT(*) AS c FROM quest_instances WHERE status = 'accepted'`,
+    `SELECT COUNT(*) AS c FROM quest_instances WHERE status = 'accepted'${
+      excludeQuestIds.length ? ` AND quest_id NOT IN (${placeholders})` : ''
+    }`,
+    ...excludeQuestIds,
   );
   return Number(r?.c ?? 0);
 }

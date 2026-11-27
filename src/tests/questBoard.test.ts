@@ -95,16 +95,16 @@ suite('tableau de quêtes — SQLite réel (node:sqlite, pas expo natif)', () =>
     expect(await acceptQuest(t.db, 'nope')).toMatchObject({ ok: false, code: 'unknown_quest' });
   });
 
-  test('maximum 3 quêtes acceptées ; abandon libère une place', async () => {
+  test('3 quêtes actives acceptables ; abandon libère une place ; quête retirée refusée', async () => {
     for (const id of ['first_confirm', 'breathe_once', 'time_tamed']) {
       expect((await acceptQuest(t.db, id)).ok).toBe(true);
     }
-    expect(await acceptQuest(t.db, 'explore_grove')).toMatchObject({ ok: false, code: 'max_accepted' });
+    expect(await acceptQuest(t.db, 'explore_grove')).toMatchObject({ ok: false, code: 'retired' });
     expect((await abandonQuest(t.db, 'time_tamed')).ok).toBe(true);
-    expect((await acceptQuest(t.db, 'explore_grove')).ok).toBe(true);
+    expect((await acceptQuest(t.db, 'time_tamed')).ok).toBe(true);
   });
 
-  test('3 acceptations concurrentes sur 4 quêtes : jamais plus de 3', async () => {
+  test('acceptations concurrentes de toutes les quêtes : jamais plus de 3, aucune quête retirée', async () => {
     await Promise.all(QUESTS.map((q) => acceptQuest(t.db, q.id)));
     expect((await getQuestBoard(t.db)).acceptedCount).toBe(3);
   });
@@ -187,35 +187,56 @@ suite('tableau de quêtes — SQLite réel (node:sqlite, pas expo natif)', () =>
     expect((await entry(t, 'time_tamed')).state).toBe('accepted');
   });
 
-  test('aventure : atteindre hidden_grove après acceptation compte, sans lanterne requise', async () => {
-    await acceptQuest(t.db, 'explore_grove', PAST());
-    await chooseAdventure(t.db, 'to_path');
-    expect((await entry(t, 'explore_grove')).state).toBe('accepted');
-    await chooseAdventure(t.db, 'enter');
-    expect((await entry(t, 'explore_grove')).state).toBe('ready');
-  });
+  describe('Ancien sentier retiré (explore_grove)', () => {
+    const seedLegacy = (status: 'accepted' | 'claimed', acceptedAt = '2025-11-01T00:00:00.000Z') =>
+      t.db.runAsync(
+        `INSERT INTO quest_instances (id, quest_id, status, progress_json, completed_at, accepted_at, claimed_at, abandoned_at)
+         VALUES ('qst-legacy', 'explore_grove', ?, NULL, ?, ?, ?, NULL)`,
+        status,
+        status === 'claimed' ? '2025-11-02T00:00:00.000Z' : null,
+        acceptedAt,
+        status === 'claimed' ? '2025-11-02T00:00:00.000Z' : null,
+      );
+    const ids = async () => (await getQuestBoard(t.db)).entries.map((e) => e.def.id);
 
-  test('aventure : être déjà dans la clairière avant l\'acceptation ne compte pas ; ressortir puis entrer oui', async () => {
-    await chooseAdventure(t.db, 'to_path');
-    await chooseAdventure(t.db, 'enter');
-    await rpgRepo.grantItem(t.db, 'lantern');
-    await equipLantern(t.db);
-    await new Promise((r) => setTimeout(r, 15));
-    await acceptQuest(t.db, 'explore_grove');
-    expect((await entry(t, 'explore_grove')).state).toBe('accepted');
-    await chooseAdventure(t.db, 'gather');
-    expect((await entry(t, 'explore_grove')).state).toBe('accepted');
-    await chooseAdventure(t.db, 'back');
-    expect((await entry(t, 'explore_grove')).state).toBe('accepted');
-    await chooseAdventure(t.db, 'enter');
-    expect((await entry(t, 'explore_grove')).state).toBe('ready');
-  });
+    test('jamais proposée : absente du tableau, non acceptable', async () => {
+      expect(await ids()).not.toContain('explore_grove');
+      expect(await acceptQuest(t.db, 'explore_grove')).toMatchObject({ ok: false, code: 'retired' });
+      expect((await getQuestBoard(t.db)).acceptedCount).toBe(0);
+    });
 
-  test('aventure : arrivée antérieure à l\'acceptation exclue', async () => {
-    await chooseAdventure(t.db, 'to_path');
-    await chooseAdventure(t.db, 'enter');
-    await acceptQuest(t.db, 'explore_grove', FUTURE());
-    expect((await entry(t, 'explore_grove')).state).toBe('accepted');
+    test('ancienne acceptation non terminée : masquée, aucun emplacement bloqué, ligne conservée', async () => {
+      await seedLegacy('accepted');
+      expect(await ids()).not.toContain('explore_grove');
+      expect((await getQuestBoard(t.db)).acceptedCount).toBe(0);
+      for (const id of ['first_confirm', 'breathe_once', 'time_tamed']) {
+        expect((await acceptQuest(t.db, id)).ok).toBe(true);
+      }
+      expect((await getQuestBoard(t.db)).acceptedCount).toBe(3);
+      const row = await t.db.getFirstAsync<{ status: string }>(
+        `SELECT status FROM quest_instances WHERE quest_id = 'explore_grove'`,
+      );
+      expect(row?.status).toBe('accepted');
+      expect(await ledgerSum(t, 'gold')).toBe(0);
+    });
+
+    test('ancienne acceptation dont le nœud a déjà été atteint : réclamable une seule fois, sans emplacement', async () => {
+      await seedLegacy('accepted');
+      await chooseAdventure(t.db, 'to_path');
+      await chooseAdventure(t.db, 'enter');
+      const e = await entry(t, 'explore_grove');
+      expect(e.state).toBe('ready');
+      expect((await getQuestBoard(t.db)).acceptedCount).toBe(0);
+      expect(await claimQuest(t.db, 'explore_grove')).toMatchObject({ ok: true, gold: 20 });
+      expect(await claimQuest(t.db, 'explore_grove')).toMatchObject({ ok: false, code: 'already_claimed' });
+      expect(await ledgerSum(t, 'gold')).toBe(20);
+    });
+
+    test('ancienne quête déjà réclamée : historique conservé et visible', async () => {
+      await seedLegacy('claimed');
+      expect((await entry(t, 'explore_grove')).state).toBe('claimed');
+      expect(await acceptQuest(t.db, 'explore_grove')).toMatchObject({ ok: false, code: 'retired' });
+    });
   });
 
   test('réclamation : refus tant que non prête, une seule fois, solde = somme du ledger', async () => {
