@@ -28,6 +28,7 @@ export function parseProgressJson(raw: string | null): {
   proofBreathingCopeSessionId?: string;
   proofEvidenceKey?: string;
   dailyOfferId?: string;
+  weeklyOfferId?: string;
   dailyParams?: DailyParams;
   rewardGold?: number;
 } {

@@ -484,7 +484,7 @@ suite('V1-04B-1 — Trois missions du jour', () => {
     await migrate(t.db);
     await migrate(t.db);
     const versions = (await t.db.getAllAsync<{ version: number }>(`SELECT version FROM schema_migrations ORDER BY version`)).map((r) => r.version);
-    expect(versions[versions.length - 1]).toBe(17);
+    expect(versions[versions.length - 1]).toBe(18);
     const after = await t.db.getFirstAsync<{ slot0_activity_id: string; slot1_activity_id: string; slot0_passed: number }>(`SELECT * FROM divers_day_slots`);
     expect(after?.slot0_activity_id).toBe(before?.slot0_activity_id);
     expect(after?.slot0_passed).toBe(0);

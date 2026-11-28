@@ -12,7 +12,10 @@ export type RenewableProofKind =
   | 'adaptive_vape_complete'
   | 'sport_session'
   | 'proches_call'
-  | 'divers_activity';
+  | 'divers_activity'
+  | 'weekly_walks'
+  | 'weekly_calls'
+  | 'weekly_divers';
 
 /** Preuves lues dans les journaux Sport / Proches / Divers (missions du jour). */
 export const DAILY_EVIDENCE_PROOFS: readonly RenewableProofKind[] = ['sport_session', 'proches_call', 'divers_activity'];
@@ -277,8 +280,68 @@ export const DAILY_POOL_IDS: readonly string[] = [
 
 export const DAILY_QUEST_COUNT = 3;
 
+export interface WeeklyQuestTemplate extends RenewableQuestTemplate {
+  proof: 'weekly_walks' | 'weekly_calls' | 'weekly_divers';
+  /** Nombre d'étapes (preuves distinctes) à réunir. */
+  steps: number;
+  /** Séances Sport « marche » : durée minimale enregistrée, en secondes. */
+  minDurationSec?: number;
+}
+
+/** Modèles réservés à « Missions de la semaine » : jamais proposés par le carnet générique ni par les missions du jour. */
+export const WEEKLY_TEMPLATES: WeeklyQuestTemplate[] = [
+  {
+    id: 'wq_walks',
+    category: 'habitudes',
+    title: 'Les pas de la semaine',
+    description: 'Trois vraies marches cette semaine, chacune d\'au moins 10 minutes.',
+    objective: 'Enregistrer 3 marches distinctes d\'au moins 10 min (durée renseignée) dans Habitudes → Sport, après acceptation.',
+    rewardGold: 20,
+    proof: 'weekly_walks',
+    steps: 3,
+    minDurationSec: 600,
+    activityId: 'walking',
+    dailyTag: 'Sport',
+    difficulty: 'normal',
+    durationLabel: '3 marches',
+    nextStep: 'Habitudes → Sport → Marche → renseigne la durée (10 min minimum).',
+  },
+  {
+    id: 'wq_calls',
+    category: 'habitudes',
+    title: 'Garder le lien',
+    description: 'Deux appels distincts à tes proches cette semaine.',
+    objective: 'Déclarer 2 appels distincts dans Habitudes → Proches, après acceptation (un contact seul ne compte pas).',
+    rewardGold: 16,
+    proof: 'weekly_calls',
+    steps: 2,
+    dailyTag: 'Proches',
+    difficulty: 'facile',
+    durationLabel: '2 appels',
+    nextStep: 'Habitudes → Proches → enregistrer chaque appel.',
+  },
+  {
+    id: 'wq_divers',
+    category: 'habitudes',
+    title: 'Les petites victoires',
+    description: 'Deux activités Divers différentes, réellement faites cette semaine.',
+    objective: 'Confirmer 2 activités Divers différentes dans Habitudes → Divers, après acceptation.',
+    rewardGold: 14,
+    proof: 'weekly_divers',
+    steps: 2,
+    dailyTag: 'Divers',
+    difficulty: 'facile',
+    durationLabel: '2 activités',
+    nextStep: 'Habitudes → Divers → « Je l\'ai fait » (deux activités différentes).',
+  },
+];
+
+export const WEEKLY_BY_ID: Record<string, WeeklyQuestTemplate> = Object.fromEntries(
+  WEEKLY_TEMPLATES.map((t) => [t.id, t]),
+);
+
 export const RENEWABLE_BY_ID: Record<string, RenewableQuestTemplate> = Object.fromEntries(
-  [...RENEWABLE_TEMPLATES, ...DAILY_ONLY_TEMPLATES].map((t) => [t.id, t]),
+  [...RENEWABLE_TEMPLATES, ...DAILY_ONLY_TEMPLATES, ...WEEKLY_TEMPLATES].map((t) => [t.id, t]),
 );
 
 export const CATEGORY_LABELS: Record<RenewableQuestCategory, string> = {

@@ -39,14 +39,14 @@ export interface DailyOpts {
   dayStartHour?: number;
 }
 
-interface Ctx {
+export interface Ctx {
   now: Date;
   timeZone: string | undefined;
   dayStartHour: number;
   today: string;
 }
 
-async function resolveCtx(db: Conn, opts: DailyOpts): Promise<Ctx> {
+export async function resolveCtx(db: Conn, opts: DailyOpts): Promise<Ctx> {
   const profile =
     opts.timeZone !== undefined && opts.dayStartHour !== undefined ? null : await profileRepo.getProfile(db);
   const now = opts.now ?? new Date();

@@ -43,6 +43,7 @@ import { SportTracker } from '@/src/design-system/SportTracker';
 import { ProchesTracker } from '@/src/design-system/ProchesTracker';
 import { DiversTracker } from '@/src/design-system/DiversTracker';
 import { DailyQuestsBlock } from '@/src/design-system/DailyQuestsBlock';
+import { WeeklyQuestsBlock } from '@/src/design-system/WeeklyQuestsBlock';
 
 const STATUS_FR: Record<TrackingStatus, string> = {
   unknown: 'Non renseigné',
@@ -372,6 +373,10 @@ export default function GoalsScreen() {
               }
             }}
           />
+        ) : null}
+
+        {mode === 'track' && !inCategory ? (
+          <WeeklyQuestsBlock onOpenActivity={(target) => setCategoryId(target)} />
         ) : null}
 
         {mode === 'track' && !inCategory ? (
