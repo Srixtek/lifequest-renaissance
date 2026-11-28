@@ -129,9 +129,19 @@ export default function AdventureScreen() {
       return;
     }
     if (zone === 'combat') {
-      setCombatOpen(true);
       setForgeOpen(false);
       setCampaignOpen(false);
+      const campaignInProgress =
+        kingdom?.combat.combatMode === 'campaign' &&
+        (kingdom.combat.active || !!kingdom.combat.outcome);
+      if (campaignInProgress) {
+        setCombatOpen(false);
+        setKingdomMsg(
+          'Un combat de campagne est en cours — ouvre la Forêt d\'Eloria pour reprendre ou voir le résultat.',
+        );
+        return;
+      }
+      setCombatOpen(true);
       if (!kingdom?.combat.active && !kingdom?.combat.outcome) {
         const eid = kingdom?.combat.enemyId;
         setPickedEnemy(eid === MIST_WOLF_ID ? MIST_WOLF_ID : THORN_GUARDIAN_ID);
@@ -162,8 +172,17 @@ export default function AdventureScreen() {
         setTab(tabParam);
       }
       if (params.openCombat === '1') {
-        setCombatOpen(true);
         setForgeOpen(false);
+        const campaignOngoing =
+          kingdom?.combat.combatMode === 'campaign' &&
+          (kingdom.combat.active || !!kingdom.combat.outcome);
+        if (campaignOngoing) {
+          setCampaignOpen(true);
+          setCombatOpen(true);
+        } else {
+          setCampaignOpen(false);
+          setCombatOpen(true);
+        }
       }
       if (params.openForge === '1') {
         setForgeOpen(true);
@@ -175,7 +194,15 @@ export default function AdventureScreen() {
         return () => clearTimeout(t);
       }
       return undefined;
-    }, [params.tab, params.instanceId, params.openCombat, params.openForge]),
+    }, [
+      params.tab,
+      params.instanceId,
+      params.openCombat,
+      params.openForge,
+      kingdom?.combat.combatMode,
+      kingdom?.combat.active,
+      kingdom?.combat.outcome,
+    ]),
   );
 
   if (!board || !kingdom || !renewableBoard) {
@@ -262,6 +289,50 @@ export default function AdventureScreen() {
     ));
 
   const skillReady = skillAffordable(kingdom.combat);
+  const campaignCombatVisible =
+    kingdom.combat.combatMode === 'campaign' && (kingdom.combat.active || !!kingdom.combat.outcome);
+  const arenaCombatVisible =
+    kingdom.combat.combatMode === 'arena' && (kingdom.combat.active || !!kingdom.combat.outcome);
+  const campaignBlocksArena =
+    kingdom.combat.combatMode === 'campaign' && kingdom.combat.active && !kingdom.combat.outcome;
+
+  const combatPanelProps = {
+    combat: kingdom.combat,
+    classId: kingdom.classId,
+    skillLabel: skillNameForClass(kingdom.classId),
+    skillReady,
+    busy: kingdomBusy,
+    onAttack: () => {
+      const turn = kingdom.combat.turnNumber;
+      const rev = kingdom.combat.updatedAt;
+      return runKingdom(async (db) => {
+        const r = await performCombatAction(db, 'attack', turn, rev);
+        return { message: r.message };
+      });
+    },
+    onDefend: () => {
+      const turn = kingdom.combat.turnNumber;
+      const rev = kingdom.combat.updatedAt;
+      return runKingdom(async (db) => {
+        const r = await performCombatAction(db, 'defend', turn, rev);
+        return { message: r.message };
+      });
+    },
+    onSkill: () => {
+      const turn = kingdom.combat.turnNumber;
+      const rev = kingdom.combat.updatedAt;
+      return runKingdom(async (db) => {
+        const r = await performCombatAction(db, 'skill', turn, rev);
+        return { message: r.message };
+      });
+    },
+    onLeave: () =>
+      runKingdom(async (db) => {
+        await dismissCombat(db);
+        setCombatOpen(false);
+        return { message: 'Retour au bastion.' };
+      }),
+  };
 
   return (
     <TabScrollView>
@@ -354,69 +425,54 @@ export default function AdventureScreen() {
                 }
               />
             ) : null}
-            {combatOpen && (kingdom.combat.active || kingdom.combat.outcome) ? (
-              <CombatPanel
-                combat={kingdom.combat}
-                classId={kingdom.classId}
-                skillLabel={skillNameForClass(kingdom.classId)}
-                skillReady={skillReady}
-                busy={kingdomBusy}
-                onAttack={() => {
-                  const turn = kingdom.combat.turnNumber;
-                  const rev = kingdom.combat.updatedAt;
-                  return runKingdom(async (db) => {
-                    const r = await performCombatAction(db, 'attack', turn, rev);
-                    return { message: r.message };
-                  });
-                }}
-                onDefend={() => {
-                  const turn = kingdom.combat.turnNumber;
-                  const rev = kingdom.combat.updatedAt;
-                  return runKingdom(async (db) => {
-                    const r = await performCombatAction(db, 'defend', turn, rev);
-                    return { message: r.message };
-                  });
-                }}
-                onSkill={() => {
-                  const turn = kingdom.combat.turnNumber;
-                  const rev = kingdom.combat.updatedAt;
-                  return runKingdom(async (db) => {
-                    const r = await performCombatAction(db, 'skill', turn, rev);
-                    return { message: r.message };
-                  });
-                }}
-                onLeave={() =>
-                  runKingdom(async (db) => {
-                    await dismissCombat(db);
-                    setCombatOpen(false);
-                    return { message: 'Retour au bastion.' };
-                  })
-                }
-              />
-            ) : combatOpen ? (
-              <FantasyPanel>
-                <Text style={styles.section}>Choisir l&apos;adversaire</Text>
-                <View style={styles.enemyRow}>
-                  {kingdom.enemies.map((e) => (
-                    <Chip
-                      key={e.id}
-                      label={`${e.name} (${e.baseHp} PV)`}
-                      selected={pickedEnemy === e.id}
-                      onPress={() => setPickedEnemy(e.id as ArenaEnemyId)}
-                    />
-                  ))}
-                </View>
-                <Button
-                  label="Engager le combat"
-                  onPress={() =>
-                    runKingdom(async (db) => {
-                      const r = await startCombat(db, pickedEnemy);
-                      return { message: r.message };
-                    })
-                  }
-                  disabled={kingdomBusy}
-                />
-              </FantasyPanel>
+            {campaignOpen && combatOpen && campaignCombatVisible ? (
+              <CombatPanel {...combatPanelProps} />
+            ) : null}
+            {combatOpen && !campaignOpen ? (
+              campaignCombatVisible ? (
+                <FantasyPanel style={styles.contextHint}>
+                  <Body>
+                    Combat de campagne en cours — ouvre la Forêt d&apos;Eloria pour combattre ou voir le résultat.
+                  </Body>
+                  <Button
+                    label="Aller à la campagne"
+                    compact
+                    onPress={() => {
+                      setCampaignOpen(true);
+                      setCombatOpen(true);
+                    }}
+                  />
+                </FantasyPanel>
+              ) : arenaCombatVisible ? (
+                <CombatPanel {...combatPanelProps} />
+              ) : (
+                <FantasyPanel>
+                  <Text style={styles.section}>Choisir l&apos;adversaire</Text>
+                  {campaignBlocksArena ? (
+                    <Body muted>Une étape de campagne bloque l&apos;arène — termine ce combat d&apos;abord.</Body>
+                  ) : null}
+                  <View style={styles.enemyRow}>
+                    {kingdom.enemies.map((e) => (
+                      <Chip
+                        key={e.id}
+                        label={`${e.name} (${e.baseHp} PV)`}
+                        selected={pickedEnemy === e.id}
+                        onPress={() => setPickedEnemy(e.id as ArenaEnemyId)}
+                      />
+                    ))}
+                  </View>
+                  <Button
+                    label="Engager le combat"
+                    onPress={() =>
+                      runKingdom(async (db) => {
+                        const r = await startCombat(db, pickedEnemy);
+                        return { message: r.message };
+                      })
+                    }
+                    disabled={kingdomBusy || campaignBlocksArena}
+                  />
+                </FantasyPanel>
+              )
             ) : null}
           </>
         ) : null}
@@ -493,4 +549,5 @@ const styles = StyleSheet.create({
   forgeMeta: { ...typography.caption, color: colors.muted, marginBottom: spacing.sm, lineHeight: 18 },
   forgeActions: { gap: spacing.xs },
   forgeConfirm: { ...typography.caption, color: colors.ink, marginBottom: spacing.xs },
+  contextHint: { marginTop: spacing.sm, gap: spacing.sm },
 });

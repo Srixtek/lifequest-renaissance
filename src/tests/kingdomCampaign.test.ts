@@ -195,7 +195,8 @@ suite('V1-05A — Campagne d\'Eloria', () => {
   test('12 — rejouer sans double or', async () => {
     await winCampaignFight(t.db, 'eloria_forest_01');
     const gold1 = await rpgRepo.getGoldBalance(t.db);
-    await t.db.runAsync(`UPDATE kingdom_combat SET outcome = NULL, active = 0, hero_hp = 28, enemy_hp = 18`);
+    const replay = await startCampaignCombat(t.db, 'eloria_forest_01');
+    expect(replay.ok).toBe(true);
     await winCampaignFight(t.db, 'eloria_forest_01');
     const gold2 = await rpgRepo.getGoldBalance(t.db);
     expect(gold2).toBe(gold1);

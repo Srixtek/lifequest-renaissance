@@ -246,7 +246,8 @@ export async function startCampaignCombat(
     if (
       stored.combatMode === 'campaign' &&
       stored.campaignStageId === stageId &&
-      (stored.active || stored.outcome)
+      stored.active &&
+      !stored.outcome
     ) {
       result = { ok: true, message: `Reprise — ${stage.name}.` };
       return;
