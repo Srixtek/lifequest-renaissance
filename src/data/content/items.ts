@@ -35,6 +35,13 @@ export const ITEMS: Record<string, ItemDef> = {
     slot: null,
     usefulEffect: null,
   },
+  forest_mist_emblem: {
+    id: 'forest_mist_emblem',
+    name: 'Emblème de la Forêt des Brumes',
+    description: 'Trophée du Souverain des Brumes — campagne d\'Eloria.',
+    slot: null,
+    usefulEffect: null,
+  },
 };
 
 export const STARTER_ITEM_ID = 'lantern';

@@ -2,14 +2,15 @@ import type { Db } from '../client';
 import type { SqlRunner } from '../sqlRunner';
 import {
   CONCENTRATION_START,
-  MIST_WOLF_ID,
-  THORN_GUARDIAN_ID,
+  normalizeEnemyId,
   normalizeEnemyIntent,
   type EnemyId,
 } from '../../../data/content/kingdom';
 import type { CombatOutcome, CombatSnapshot, EnemyIntent } from '../../../domain/combat/combatEngine';
 
 type Conn = Db | SqlRunner;
+
+export type CombatMode = 'arena' | 'campaign';
 
 export interface ForgeState {
   level: number;
@@ -19,12 +20,9 @@ export interface ForgeState {
 export interface StoredCombat extends CombatSnapshot {
   active: boolean;
   firstWinRewarded: boolean;
+  combatMode: CombatMode;
+  campaignStageId: string | null;
   updatedAt: string;
-}
-
-function parseEnemyId(raw: unknown): EnemyId {
-  const s = String(raw ?? THORN_GUARDIAN_ID);
-  return s === MIST_WOLF_ID ? MIST_WOLF_ID : THORN_GUARDIAN_ID;
 }
 
 function rowToCombat(r: Record<string, unknown>): StoredCombat {
@@ -37,12 +35,15 @@ function rowToCombat(r: Record<string, unknown>): StoredCombat {
     turnNumber: Number(r.turn_number),
     enemyIntent: normalizeEnemyIntent(String(r.enemy_intent)) as EnemyIntent,
     enemyIntentIndex: Number(r.enemy_intent_index ?? 0),
-    enemyId: parseEnemyId(r.enemy_id),
+    enemyId: normalizeEnemyId(r.enemy_id),
+    enemyPhase: Number(r.enemy_phase ?? 0),
     concentration: Number(r.concentration ?? CONCENTRATION_START),
     heroGuarding: !!r.hero_guarding,
     outcome: (r.outcome as CombatOutcome) ?? null,
     log: JSON.parse(String(r.log_json || '[]')),
     firstWinRewarded: !!r.first_win_rewarded,
+    combatMode: r.combat_mode === 'campaign' ? 'campaign' : 'arena',
+    campaignStageId: r.campaign_stage_id ? String(r.campaign_stage_id) : null,
     updatedAt: String(r.updated_at),
   };
 }
@@ -60,9 +61,10 @@ export async function ensureKingdomDefaults(db: Conn): Promise<void> {
     await db.runAsync(
       `INSERT INTO kingdom_combat (
         id, active, hero_hp, hero_hp_max, enemy_hp, enemy_hp_max,
-        turn_number, enemy_intent, enemy_intent_index, enemy_id, concentration,
-        hero_guarding, skill_cooldown, outcome, log_json, first_win_rewarded, updated_at
-      ) VALUES (1, 0, 0, 0, 0, 0, 0, 'normal', 0, 'thorn_guardian', 1, 0, 0, NULL, '[]', 0, ?)`,
+        turn_number, enemy_intent, enemy_intent_index, enemy_id, enemy_phase, concentration,
+        hero_guarding, skill_cooldown, outcome, log_json, first_win_rewarded,
+        combat_mode, campaign_stage_id, updated_at
+      ) VALUES (1, 0, 0, 0, 0, 0, 0, 'normal', 0, 'thorn_guardian', 0, 1, 0, 0, NULL, '[]', 0, 'arena', NULL, ?)`,
       new Date().toISOString(),
     );
   }
@@ -94,8 +96,9 @@ export async function saveCombatState(db: Conn, state: StoredCombat): Promise<vo
   await db.runAsync(
     `UPDATE kingdom_combat SET
       active = ?, hero_hp = ?, hero_hp_max = ?, enemy_hp = ?, enemy_hp_max = ?,
-      turn_number = ?, enemy_intent = ?, enemy_intent_index = ?, enemy_id = ?, concentration = ?,
-      hero_guarding = ?, outcome = ?, log_json = ?, first_win_rewarded = ?, updated_at = ?
+      turn_number = ?, enemy_intent = ?, enemy_intent_index = ?, enemy_id = ?, enemy_phase = ?, concentration = ?,
+      hero_guarding = ?, outcome = ?, log_json = ?, first_win_rewarded = ?,
+      combat_mode = ?, campaign_stage_id = ?, updated_at = ?
      WHERE id = 1`,
     state.active ? 1 : 0,
     state.heroHp,
@@ -106,11 +109,14 @@ export async function saveCombatState(db: Conn, state: StoredCombat): Promise<vo
     state.enemyIntent,
     state.enemyIntentIndex,
     state.enemyId,
+    state.enemyPhase,
     state.concentration,
     state.heroGuarding ? 1 : 0,
     state.outcome,
     JSON.stringify(state.log),
     state.firstWinRewarded ? 1 : 0,
+    state.combatMode,
+    state.campaignStageId,
     state.updatedAt,
   );
 }

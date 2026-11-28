@@ -50,9 +50,14 @@ export function KingdomScene({ forgeLevel, onZone, height = 276 }: Props) {
         buildingDp={buildingSpriteDp}
       />
 
-      <View style={styles.forestSlot} pointerEvents="none" accessibilityElementsHidden>
-        <Text style={styles.lockedTag}>Forêt — bientôt</Text>
-      </View>
+      <Pressable
+        style={styles.forestSlot}
+        onPress={() => onZone('forest')}
+        accessibilityRole="button"
+        accessibilityLabel="Campagne d'Eloria — Forêt des Brumes"
+      >
+        <Text style={styles.forestTag}>Forêt — Campagne</Text>
+      </Pressable>
 
       <Pressable
         style={[styles.hit, hitboxes.combat]}
@@ -98,7 +103,7 @@ const styles = StyleSheet.create({
     borderColor: colors.line,
     backgroundColor: 'rgba(7,15,14,0.72)',
   },
-  lockedTag: { ...typography.caption, color: colors.muted, fontSize: 11 },
+  forestTag: { ...typography.caption, color: colors.emerald, fontSize: 11 },
   hit: {
     position: 'absolute',
     minHeight: 48,

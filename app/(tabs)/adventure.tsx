@@ -7,6 +7,7 @@ import { QuestBoardCard } from '@/src/design-system/QuestBoardCard';
 import { EmptyState } from '@/src/design-system/QuestCard';
 import { KingdomScene, type KingdomZone } from '@/src/design-system/KingdomScene';
 import { CombatPanel } from '@/src/design-system/CombatPanel';
+import { EloriaCampaignPanel } from '@/src/design-system/EloriaCampaignPanel';
 import { colors, spacing, typography } from '@/src/design-system/theme';
 import { FORGE_LEVEL_LABELS } from '@/src/data/content/kingdom';
 import { getDb } from '@/src/data/db/client';
@@ -41,10 +42,11 @@ import {
   getKingdomView,
   performCombatAction,
   skillNameForClass,
+  startCampaignCombat,
   startCombat,
 } from '@/src/domain/services/kingdomService';
 import { skillAffordable } from '@/src/domain/combat/combatEngine';
-import { MIST_WOLF_ID, THORN_GUARDIAN_ID, type EnemyId } from '@/src/data/content/kingdom';
+import { MIST_WOLF_ID, THORN_GUARDIAN_ID, type ArenaEnemyId, type EnemyId } from '@/src/data/content/kingdom';
 import { useAppStore } from '@/src/state/appStore';
 
 export default function AdventureScreen() {
@@ -65,7 +67,8 @@ export default function AdventureScreen() {
   const [forgeOpen, setForgeOpen] = useState(false);
   const [forgeConfirm, setForgeConfirm] = useState(false);
   const [combatOpen, setCombatOpen] = useState(false);
-  const [pickedEnemy, setPickedEnemy] = useState<EnemyId>(THORN_GUARDIAN_ID);
+  const [campaignOpen, setCampaignOpen] = useState(false);
+  const [pickedEnemy, setPickedEnemy] = useState<ArenaEnemyId>(THORN_GUARDIAN_ID);
   const questLock = useRef(false);
   const kingdomLock = useRef(false);
 
@@ -122,14 +125,23 @@ export default function AdventureScreen() {
     if (zone === 'forge') {
       setForgeOpen(true);
       setCombatOpen(false);
+      setCampaignOpen(false);
       return;
     }
     if (zone === 'combat') {
       setCombatOpen(true);
       setForgeOpen(false);
+      setCampaignOpen(false);
       if (!kingdom?.combat.active && !kingdom?.combat.outcome) {
-        setPickedEnemy((kingdom?.combat.enemyId as EnemyId) ?? THORN_GUARDIAN_ID);
+        const eid = kingdom?.combat.enemyId;
+        setPickedEnemy(eid === MIST_WOLF_ID ? MIST_WOLF_ID : THORN_GUARDIAN_ID);
       }
+      return;
+    }
+    if (zone === 'forest') {
+      setCampaignOpen(true);
+      setForgeOpen(false);
+      setCombatOpen(kingdom?.combat.combatMode === 'campaign');
       return;
     }
     if (zone === 'camp') {
@@ -319,6 +331,29 @@ export default function AdventureScreen() {
                 ) : null}
               </FantasyPanel>
             ) : null}
+            {campaignOpen ? (
+              <EloriaCampaignPanel
+                campaign={kingdom.campaign}
+                busy={kingdomBusy}
+                combatOpen={combatOpen && (kingdom.combat.active || !!kingdom.combat.outcome)}
+                onResume={() => {
+                  if (kingdom.campaign.activeStageId) {
+                    setCombatOpen(true);
+                    runKingdom(async (db) => {
+                      const r = await startCampaignCombat(db, kingdom.campaign.activeStageId!);
+                      return { message: r.message };
+                    });
+                  }
+                }}
+                onStartStage={(stageId) =>
+                  runKingdom(async (db) => {
+                    const r = await startCampaignCombat(db, stageId);
+                    if (r.ok) setCombatOpen(true);
+                    return { message: r.message };
+                  })
+                }
+              />
+            ) : null}
             {combatOpen && (kingdom.combat.active || kingdom.combat.outcome) ? (
               <CombatPanel
                 combat={kingdom.combat}
@@ -367,7 +402,7 @@ export default function AdventureScreen() {
                       key={e.id}
                       label={`${e.name} (${e.baseHp} PV)`}
                       selected={pickedEnemy === e.id}
-                      onPress={() => setPickedEnemy(e.id as EnemyId)}
+                      onPress={() => setPickedEnemy(e.id as ArenaEnemyId)}
                     />
                   ))}
                 </View>

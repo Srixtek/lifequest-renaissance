@@ -1,7 +1,7 @@
 import type { Db } from '../../data/db/client';
 import type { SqlRunner } from '../../data/db/sqlRunner';
 import {
-  ENEMY_DEFS,
+  ARENA_ENEMY_DEFS,
   FIRST_WIN_ITEM_ID,
   FORGE_BUILDING_ID,
   FORGE_DAMAGE_PER_LEVEL,
@@ -10,8 +10,16 @@ import {
   FORGE_UPGRADE_COST,
   HERO_BASE_DAMAGE,
   THORN_GUARDIAN_ID,
+  type ArenaEnemyId,
   type EnemyId,
 } from '../../data/content/kingdom';
+import {
+  CAMPAIGN_TROPHY_ITEM_ID,
+  ELORIA_CAMPAIGN_ZONE,
+  campaignFirstWinKey,
+  stageById,
+} from '../../data/content/eloriaCampaign';
+import * as campaignRepo from '../../data/db/repositories/campaignRepo';
 import * as kingdomRepo from '../../data/db/repositories/kingdomRepo';
 import * as combatVictoryRepo from '../../data/db/repositories/combatVictoryRepo';
 import * as profileRepo from '../../data/db/repositories/profileRepo';
@@ -34,6 +42,7 @@ export function forgeUpgradeKey(level: number): string {
 
 export async function getKingdomView(db: Conn) {
   await kingdomRepo.ensureKingdomDefaults(db);
+  await campaignRepo.ensureCampaignDefaults(db);
   const forge = await kingdomRepo.getForgeLevel(db);
   const combat = await kingdomRepo.getCombatState(db);
   const gold = await rpgRepo.getGoldBalance(db);
@@ -41,6 +50,12 @@ export async function getKingdomView(db: Conn) {
   const classId = (profile?.classId ?? 'rodeur') as ClassId;
   const nextLevel = forge.level < FORGE_MAX_LEVEL ? ((forge.level + 1) as 1 | 2) : null;
   const upgradeCost = nextLevel ? FORGE_UPGRADE_COST[nextLevel] : null;
+  const campaignProgress = await campaignRepo.getCampaignProgress(db);
+  const campaignStages = campaignRepo.buildStageBoard(campaignProgress);
+  const inv = await db.getFirstAsync<{ quantity: number }>(
+    'SELECT quantity FROM inventory_items WHERE item_id = ?',
+    CAMPAIGN_TROPHY_ITEM_ID,
+  );
   return {
     forge: {
       level: forge.level,
@@ -55,7 +70,17 @@ export async function getKingdomView(db: Conn) {
     classId,
     canUpgrade: !!(nextLevel && upgradeCost !== null && gold >= upgradeCost),
     hasTrophy: combat.firstWinRewarded,
-    enemies: Object.values(ENEMY_DEFS).map((e) => ({ id: e.id, name: e.name, baseHp: e.baseHp })),
+    enemies: Object.values(ARENA_ENEMY_DEFS).map((e) => ({ id: e.id, name: e.name, baseHp: e.baseHp })),
+    campaign: {
+      zoneName: ELORIA_CAMPAIGN_ZONE,
+      stages: campaignStages,
+      highestUnlocked: campaignProgress.highestUnlocked,
+      hasCampaignTrophy: !!inv,
+      activeStageId:
+        combat.combatMode === 'campaign' && combat.active && !combat.outcome ? combat.campaignStageId : null,
+      canResumeCampaign:
+        combat.combatMode === 'campaign' && (combat.active || !!combat.outcome) && !!combat.campaignStageId,
+    },
   };
 }
 
@@ -132,16 +157,28 @@ async function resolveProfileClass(db: Conn): Promise<ClassId> {
   return (p?.classId ?? 'rodeur') as ClassId;
 }
 
-function resolveEnemyId(id?: string): EnemyId {
+function resolveArenaEnemyId(id?: string): ArenaEnemyId {
   return id === 'mist_wolf' ? 'mist_wolf' : THORN_GUARDIAN_ID;
 }
 
-export async function startCombat(db: Db, enemyId?: EnemyId): Promise<{ ok: boolean; message: string }> {
-  const target = resolveEnemyId(enemyId);
-  let result = { ok: false, message: 'Combat indisponible.' };
+function activeCombatBlocksNew(stored: Awaited<ReturnType<typeof kingdomRepo.getCombatState>>): boolean {
+  return stored.active && !stored.outcome;
+}
+
+export async function startCombat(db: Db, enemyId?: ArenaEnemyId): Promise<{ ok: boolean; code?: string; message: string }> {
+  const target = resolveArenaEnemyId(enemyId);
+  let result: { ok: boolean; code?: string; message: string } = { ok: false, message: 'Combat indisponible.' };
   await db.withExclusiveTransactionAsync(async (tx) => {
     const stored = await kingdomRepo.getCombatState(tx);
-    if (stored.active && !stored.outcome) {
+    if (activeCombatBlocksNew(stored)) {
+      if (stored.combatMode === 'campaign') {
+        result = {
+          ok: false,
+          code: 'campaign_active',
+          message: 'Une étape de campagne est en cours — reprends-la ou termine le combat.',
+        };
+        return;
+      }
       result = {
         ok: true,
         message: `Reprise du combat contre ${enemyDisplayName(stored.enemyId)}.`,
@@ -155,11 +192,115 @@ export async function startCombat(db: Db, enemyId?: EnemyId): Promise<{ ok: bool
       ...snap,
       active: true,
       firstWinRewarded: stored.firstWinRewarded,
+      combatMode: 'arena',
+      campaignStageId: null,
       updatedAt: now,
     });
     result = { ok: true, message: `${enemyDisplayName(target)} t'attend à l'arène.` };
   });
   return result;
+}
+
+export async function startCampaignCombat(
+  db: Db,
+  stageId: string,
+): Promise<{ ok: boolean; code?: string; message: string }> {
+  const stage = stageById(stageId);
+  if (!stage) return { ok: false, code: 'unknown_stage', message: 'Étape inconnue.' };
+
+  let result: { ok: boolean; code?: string; message: string } = { ok: false, message: 'Combat indisponible.' };
+  await db.withExclusiveTransactionAsync(async (tx) => {
+    const progress = await campaignRepo.getCampaignProgress(tx);
+    const cleared = progress.clearedStageIds.includes(stage.id);
+    const status = campaignRepo.stageStatus(progress, stage.number, cleared);
+    if (status === 'locked') {
+      result = { ok: false, code: 'locked', message: 'Cette étape est encore verrouillée.' };
+      return;
+    }
+
+    const stored = await kingdomRepo.getCombatState(tx);
+    if (activeCombatBlocksNew(stored)) {
+      if (stored.combatMode === 'campaign' && stored.campaignStageId === stageId) {
+        result = {
+          ok: true,
+          message: `Reprise — ${stage.name} (${enemyDisplayName(stored.enemyId)}).`,
+        };
+        return;
+      }
+      if (stored.combatMode === 'arena') {
+        result = {
+          ok: false,
+          code: 'arena_active',
+          message: 'Un combat d\'arène est en cours — termine-le avant la campagne.',
+        };
+        return;
+      }
+      result = {
+        ok: false,
+        code: 'other_campaign',
+        message: 'Un autre combat de campagne est actif.',
+      };
+      return;
+    }
+
+    if (
+      stored.combatMode === 'campaign' &&
+      stored.campaignStageId === stageId &&
+      (stored.active || stored.outcome)
+    ) {
+      result = { ok: true, message: `Reprise — ${stage.name}.` };
+      return;
+    }
+
+    const forge = await kingdomRepo.getForgeLevel(tx);
+    const snap = createInitialCombat(
+      forge.level,
+      stage.enemyId as EnemyId,
+      `${stage.name} — ${enemyDisplayName(stage.enemyId as EnemyId)}.`,
+    );
+    const now = new Date().toISOString();
+    await kingdomRepo.saveCombatState(tx, {
+      ...snap,
+      active: true,
+      firstWinRewarded: stored.firstWinRewarded,
+      combatMode: 'campaign',
+      campaignStageId: stageId,
+      updatedAt: now,
+    });
+    result = { ok: true, message: `Campagne : ${stage.name} — ${snap.log[0] ?? 'Combat engagé.'}` };
+  });
+  return result;
+}
+
+async function applyCampaignVictory(
+  tx: SqlRunner,
+  stageId: string,
+  now: string,
+): Promise<{ goldLine: string; trophyLine: string }> {
+  const stage = stageById(stageId);
+  if (!stage) return { goldLine: '', trophyLine: '' };
+
+  const progress = await campaignRepo.getCampaignProgress(tx);
+  const nextProgress = campaignRepo.recordStageOutcome(progress, stageId, 'victory', now);
+  await campaignRepo.saveCampaignProgress(tx, nextProgress);
+
+  const key = campaignFirstWinKey(stageId);
+  const goldResult = await rpgRepo.addGold(tx, stage.firstWinGold, `campagne ${stage.name}`, key);
+  const goldLine =
+    goldResult === 'inserted' ? `+${stage.firstWinGold} or (première victoire).` : 'Or déjà réclamé pour cette étape.';
+
+  let trophyLine = '';
+  if (stage.number === 10) {
+    const tr = await rpgRepo.grantItemOnce(tx, CAMPAIGN_TROPHY_ITEM_ID);
+    if (tr === 'granted') trophyLine = ' Emblème de la Forêt des Brumes obtenu !';
+  }
+  return { goldLine, trophyLine };
+}
+
+async function applyCampaignDefeat(tx: SqlRunner, stageId: string, now: string): Promise<void> {
+  const progress = await campaignRepo.getCampaignProgress(tx);
+  const nextProgress = campaignRepo.recordStageOutcome(progress, stageId, 'defeat', now);
+  await campaignRepo.saveCampaignProgress(tx, nextProgress);
 }
 
 export async function performCombatAction(
@@ -199,23 +340,37 @@ export async function performCombatAction(
       ...updated,
       active: !updated.outcome,
       firstWinRewarded: stored.firstWinRewarded,
+      combatMode: stored.combatMode,
+      campaignStageId: stored.campaignStageId,
       updatedAt: now,
     };
 
-    if (updated.outcome === 'victory' && !stored.firstWinRewarded) {
+    let rewardExtra = '';
+    if (updated.outcome === 'victory' && stored.combatMode === 'arena' && !stored.firstWinRewarded) {
       const banner = await rpgRepo.grantItemOnce(tx, FIRST_WIN_ITEM_ID);
       if (banner === 'granted') next.firstWinRewarded = true;
     } else if (stored.firstWinRewarded) {
       next.firstWinRewarded = true;
     }
 
+    if (updated.outcome === 'victory' && stored.combatMode === 'campaign' && stored.campaignStageId) {
+      const { goldLine, trophyLine } = await applyCampaignVictory(tx, stored.campaignStageId, now);
+      rewardExtra = ` ${goldLine}${trophyLine}`;
+    } else if (updated.outcome === 'defeat' && stored.combatMode === 'campaign' && stored.campaignStageId) {
+      await applyCampaignDefeat(tx, stored.campaignStageId, now);
+    }
+
     await kingdomRepo.saveCombatState(tx, next);
     if (updated.outcome === 'victory' || updated.outcome === 'defeat') {
-      await combatVictoryRepo.logCombatOutcome(tx, stored.enemyId, updated.outcome, now);
+      if (stored.combatMode === 'arena') {
+        await combatVictoryRepo.logCombatOutcome(tx, stored.enemyId, updated.outcome, now);
+      }
     }
     const last = updated.log[updated.log.length - 1] ?? '';
-    if (updated.outcome === 'victory' && !stored.firstWinRewarded) {
+    if (updated.outcome === 'victory' && stored.combatMode === 'arena' && !stored.firstWinRewarded) {
       result = { ok: true, message: `${last} Bannière du bastion ajoutée à l'inventaire.` };
+    } else if (updated.outcome === 'victory' && stored.combatMode === 'campaign') {
+      result = { ok: true, message: `${last}${rewardExtra}` };
     } else if (updated.outcome === 'defeat') {
       result = { ok: true, message: `${last} Tu peux réessayer.` };
     } else {
@@ -230,12 +385,26 @@ export async function dismissCombat(db: Db): Promise<void> {
     const stored = await kingdomRepo.getCombatState(tx);
     if (!stored.outcome) return;
     const now = new Date().toISOString();
-    await kingdomRepo.saveCombatState(tx, {
-      ...createInitialCombat((await kingdomRepo.getForgeLevel(tx)).level, stored.enemyId),
-      active: false,
-      firstWinRewarded: stored.firstWinRewarded,
-      updatedAt: now,
-    });
+    const forge = await kingdomRepo.getForgeLevel(tx);
+    if (stored.combatMode === 'campaign' && stored.campaignStageId) {
+      await kingdomRepo.saveCombatState(tx, {
+        ...createInitialCombat(forge.level, stored.enemyId),
+        active: false,
+        firstWinRewarded: stored.firstWinRewarded,
+        combatMode: 'campaign',
+        campaignStageId: stored.campaignStageId,
+        updatedAt: now,
+      });
+    } else {
+      await kingdomRepo.saveCombatState(tx, {
+        ...createInitialCombat(forge.level, stored.enemyId as ArenaEnemyId),
+        active: false,
+        firstWinRewarded: stored.firstWinRewarded,
+        combatMode: 'arena',
+        campaignStageId: null,
+        updatedAt: now,
+      });
+    }
   });
 }
 

@@ -1,3 +1,5 @@
+import { CAMPAIGN_ENEMY_DEFS, type CampaignEnemyId } from './eloriaCampaign';
+
 /** Forge du bastion — indépendante de camp_level. */
 export const FORGE_BUILDING_ID = 'forge';
 export const FORGE_MAX_LEVEL = 2;
@@ -9,7 +11,8 @@ export const THORN_GUARDIAN_NAME = 'Gardien des Ronces';
 export const MIST_WOLF_ID = 'mist_wolf';
 export const MIST_WOLF_NAME = 'Loup des Brumes';
 
-export type EnemyId = typeof THORN_GUARDIAN_ID | typeof MIST_WOLF_ID;
+export type ArenaEnemyId = typeof THORN_GUARDIAN_ID | typeof MIST_WOLF_ID;
+export type EnemyId = ArenaEnemyId | CampaignEnemyId;
 
 export const CONCENTRATION_MAX = 3;
 export const CONCENTRATION_START = 1;
@@ -38,7 +41,7 @@ export interface EnemyDef {
   intentPattern: ReadonlyArray<'normal' | 'heavy' | 'brace'>;
 }
 
-export const ENEMY_DEFS: Record<EnemyId, EnemyDef> = {
+export const ARENA_ENEMY_DEFS: Record<ArenaEnemyId, EnemyDef> = {
   [THORN_GUARDIAN_ID]: {
     id: THORN_GUARDIAN_ID,
     name: THORN_GUARDIAN_NAME,
@@ -56,6 +59,23 @@ export const ENEMY_DEFS: Record<EnemyId, EnemyDef> = {
     intentPattern: ['normal', 'normal', 'heavy', 'brace'],
   },
 };
+
+export const ENEMY_DEFS: Record<string, EnemyDef> = {
+  ...ARENA_ENEMY_DEFS,
+  ...CAMPAIGN_ENEMY_DEFS,
+};
+
+const KNOWN_ENEMY_IDS = new Set<string>(Object.keys(ENEMY_DEFS));
+
+export function isKnownEnemyId(id: string): id is EnemyId {
+  return KNOWN_ENEMY_IDS.has(id);
+}
+
+export function normalizeEnemyId(raw: unknown): EnemyId {
+  const s = String(raw ?? THORN_GUARDIAN_ID);
+  if (isKnownEnemyId(s)) return s;
+  return THORN_GUARDIAN_ID;
+}
 
 export const FIRST_WIN_ITEM_ID = 'bastion_victory_banner';
 
