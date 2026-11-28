@@ -61,10 +61,16 @@ function intentPatternFor(state: Pick<CombatSnapshot, 'enemyId' | 'enemyPhase'>)
   return enemyDef(state.enemyId).intentPattern;
 }
 
-function maybeAdvanceBossPhase(state: CombatSnapshot): CombatSnapshot {
+function shouldEnterBossPhase(state: CombatSnapshot): boolean {
   const boss = campaignEnemyDef(state.enemyId);
-  if (!boss?.bossPhaseShift || state.enemyPhase >= 1 || state.enemyHpMax <= 0) return state;
-  if (state.enemyHp / state.enemyHpMax > boss.bossPhaseShift.hpRatio) return state;
+  if (!boss?.bossPhaseShift || state.enemyPhase >= 1 || state.enemyHpMax <= 0) return false;
+  if (state.enemyHp <= 0) return false;
+  return state.enemyHp / state.enemyHpMax <= boss.bossPhaseShift.hpRatio;
+}
+
+function enterBossPhaseAtTurnEnd(state: CombatSnapshot): CombatSnapshot {
+  const boss = campaignEnemyDef(state.enemyId);
+  if (!boss?.bossPhaseShift) return state;
   const pattern = boss.bossPhaseShift.intentPattern;
   const first = pattern[0] ?? 'normal';
   return {
@@ -213,7 +219,6 @@ export function applyPlayerAction(
     const res = applyDamageToEnemy(next.enemyHp, dmg, next.enemyIntent);
     next.enemyHp = res.hp;
     next.log.push(`Tu frappes pour ${res.dealt} dégâts.`);
-    Object.assign(next, maybeAdvanceBossPhase(next));
     lastFx = 'hit';
   } else if (action === 'defend') {
     next.heroGuarding = true;
@@ -232,7 +237,6 @@ export function applyPlayerAction(
         const res = applyDamageToEnemy(next.enemyHp, dmg, next.enemyIntent);
         next.enemyHp = res.hp;
         next.log.push(`${label} : ${res.dealt} dégâts précis.`);
-        Object.assign(next, maybeAdvanceBossPhase(next));
         lastFx = 'hit';
         break;
       }
@@ -254,7 +258,6 @@ export function applyPlayerAction(
         const res = applyDamageToEnemy(next.enemyHp, dmg, next.enemyIntent);
         next.enemyHp = res.hp;
         next.log.push(`${label} : ${res.dealt} dégâts (bonus forge).`);
-        Object.assign(next, maybeAdvanceBossPhase(next));
         lastFx = 'hit';
         break;
       }
@@ -298,10 +301,18 @@ export function applyPlayerAction(
     return next;
   }
 
-  const advanced = advanceIntent(next);
-  next.enemyIntent = advanced.intent;
-  next.enemyIntentIndex = advanced.index;
   next.turnNumber += 1;
+  if (shouldEnterBossPhase(next)) {
+    const shifted = enterBossPhaseAtTurnEnd(next);
+    next.enemyPhase = shifted.enemyPhase;
+    next.enemyIntentIndex = shifted.enemyIntentIndex;
+    next.enemyIntent = shifted.enemyIntent;
+    next.log = shifted.log;
+  } else {
+    const advanced = advanceIntent(next);
+    next.enemyIntent = advanced.intent;
+    next.enemyIntentIndex = advanced.index;
+  }
   next.log.push(`Prochaine intention : ${intentLabel(next.enemyIntent)}.`);
 
   return next;
