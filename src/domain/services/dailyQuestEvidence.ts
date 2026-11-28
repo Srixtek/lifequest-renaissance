@@ -51,14 +51,24 @@ export async function findDailyEvidence(
         minuteFloor(acceptedAt),
         acceptedAt,
       );
+      const frozenMetric = params?.goalMetric;
+      const frozenTarget = params?.goalTarget;
       for (const r of rows) {
-        const metric = String(r.goal_metric ?? '');
-        const target = Number(r.goal_target ?? 0);
+        const sessionMetric = String(r.goal_metric ?? '');
+        let metric: string;
+        let requiredTarget: number;
+        if (frozenMetric && frozenTarget != null && frozenTarget > 0) {
+          if (sessionMetric !== frozenMetric) continue;
+          metric = frozenMetric;
+          requiredTarget = frozenTarget;
+        } else {
+          metric = sessionMetric;
+          requiredTarget = Number(r.goal_target ?? 0);
+        }
         const col = SPORT_COLUMN[metric];
-        if (!col || !(target > 0)) continue;
+        if (!col || !(requiredTarget > 0)) continue;
         const value = Number(r[col] ?? 0);
-        if (value < target) continue;
-        if (params?.goalMetric === metric && params.goalTarget != null && target < params.goalTarget) continue;
+        if (value < requiredTarget) continue;
         const evidenceKey = `sport_session:${String(r.id)}`;
         if (await isEvidencePaid(db, evidenceKey)) continue;
         return { evidenceKey, evidenceGroup: evidenceKey, source: 'sport' };
@@ -123,6 +133,23 @@ export async function explainMissingEvidence(
         acceptedAt,
       );
       if (rows.length === 0) return 'Aucune séance enregistrée depuis l\'acceptation.';
+      const frozenMetric = params?.goalMetric;
+      const frozenTarget = params?.goalTarget;
+      const achieved = rows.filter((r) => r.outcome === 'achieved');
+      if (frozenMetric && frozenTarget != null && frozenTarget > 0 && achieved.length > 0) {
+        const col = SPORT_COLUMN[frozenMetric];
+        const mismatch = achieved.some((r) => String(r.goal_metric ?? '') !== frozenMetric);
+        if (mismatch) {
+          return 'Séance enregistrée sur une autre métrique que celle de la mission : elle ne valide pas la mission.';
+        }
+        const under = achieved.some((r) => {
+          if (!col) return true;
+          return Number(r[col] ?? 0) < frozenTarget;
+        });
+        if (under) {
+          return `Séance enregistrée mais objectif de la mission (${frozenTarget}) non atteint : elle reste dans tes stats.`;
+        }
+      }
       if (rows.some((r) => r.outcome === 'failed')) {
         return 'Séance enregistrée mais objectif non atteint : elle reste dans tes stats, la mission n\'est pas validée.';
       }

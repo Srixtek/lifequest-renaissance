@@ -361,9 +361,15 @@ export default function GoalsScreen() {
 
         {mode === 'track' && !inCategory ? (
           <DailyQuestsBlock
-            onOpenActivity={(target) => {
-              if (target === 'adventure') router.push('/(tabs)/adventure');
-              else setCategoryId(target);
+            onOpenActivity={(route) => {
+              if (route.kind === 'adventure') {
+                const q = new URLSearchParams();
+                q.set('tab', route.tab);
+                if (route.instanceId) q.set('instanceId', route.instanceId);
+                router.push(`/(tabs)/adventure?${q.toString()}`);
+              } else {
+                setCategoryId(route.target);
+              }
             }}
           />
         ) : null}
