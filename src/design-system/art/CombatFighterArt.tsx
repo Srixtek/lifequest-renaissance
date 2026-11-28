@@ -91,6 +91,21 @@ function HeroFigure({ classId }: { classId: ClassId }) {
 }
 
 function EnemyFigure({ enemyId }: { enemyId: EnemyId }) {
+  if (enemyId.startsWith('forest_')) {
+    return (
+      <G>
+        <Path
+          d="M32 12 Q18 20 16 38 Q18 52 32 54 Q46 50 48 34 Q46 18 32 12"
+          fill="#354A58"
+          stroke={colors.glow}
+          strokeWidth="0.7"
+        />
+        <Circle cx="26" cy="32" r="2.2" fill={colors.warn} />
+        <Circle cx="38" cy="32" r="2.2" fill={colors.warn} />
+        <Path d="M12 36 Q8 42 14 44" stroke={colors.mist} strokeWidth="1" fill="none" opacity="0.6" />
+      </G>
+    );
+  }
   if (enemyId === 'mist_wolf') {
     return (
       <G>

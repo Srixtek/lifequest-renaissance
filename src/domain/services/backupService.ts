@@ -31,6 +31,7 @@ const TABLES = [
   'adaptive_challenge_records',
   'kingdom_buildings',
   'kingdom_combat',
+  'kingdom_campaign',
   'renewable_quest_instances',
   'renewable_quest_history',
   'combat_victory_log',
@@ -114,6 +115,7 @@ const WIPE_ORDER: readonly string[] = [
   'renewable_quest_history',
   'renewable_quest_instances',
   'kingdom_combat',
+  'kingdom_campaign',
   'kingdom_buildings',
   'character_progress',
   'adventure_state',
@@ -201,6 +203,12 @@ function normalizeKingdomCombatImportRow(row: Record<string, unknown>): Record<s
     if (cd >= 2) out.concentration = 0;
     else if (cd === 1) out.concentration = 1;
     else out.concentration = 1;
+  }
+  if (out.enemy_phase === undefined || out.enemy_phase === null) {
+    out.enemy_phase = 0;
+  }
+  if (out.combat_mode === undefined || out.combat_mode === null) {
+    out.combat_mode = 'arena';
   }
   return out;
 }

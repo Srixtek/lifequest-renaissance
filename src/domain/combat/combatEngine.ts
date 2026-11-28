@@ -1,5 +1,9 @@
 import type { ClassId } from '../models/types';
 import {
+  CAMPAIGN_ENEMY_DEFS,
+  type CampaignEnemyId,
+} from '../../data/content/eloriaCampaign';
+import {
   CONCENTRATION_MAX,
   CONCENTRATION_START,
   DEFEND_CONCENTRATION_GAIN,
@@ -30,6 +34,7 @@ export interface CombatSnapshot {
   enemyIntent: EnemyIntent;
   enemyIntentIndex: number;
   enemyId: EnemyId;
+  enemyPhase: number;
   concentration: number;
   heroGuarding: boolean;
   outcome: CombatOutcome;
@@ -44,6 +49,31 @@ export interface CombatDerivedStats {
 
 function enemyDef(id: EnemyId) {
   return ENEMY_DEFS[id] ?? ENEMY_DEFS[THORN_GUARDIAN_ID];
+}
+
+function campaignEnemyDef(id: EnemyId) {
+  return CAMPAIGN_ENEMY_DEFS[id as CampaignEnemyId];
+}
+
+function intentPatternFor(state: Pick<CombatSnapshot, 'enemyId' | 'enemyPhase'>): ReadonlyArray<EnemyIntent> {
+  const boss = campaignEnemyDef(state.enemyId);
+  if (state.enemyPhase >= 1 && boss?.bossPhaseShift) return boss.bossPhaseShift.intentPattern;
+  return enemyDef(state.enemyId).intentPattern;
+}
+
+function maybeAdvanceBossPhase(state: CombatSnapshot): CombatSnapshot {
+  const boss = campaignEnemyDef(state.enemyId);
+  if (!boss?.bossPhaseShift || state.enemyPhase >= 1 || state.enemyHpMax <= 0) return state;
+  if (state.enemyHp / state.enemyHpMax > boss.bossPhaseShift.hpRatio) return state;
+  const pattern = boss.bossPhaseShift.intentPattern;
+  const first = pattern[0] ?? 'normal';
+  return {
+    ...state,
+    enemyPhase: 1,
+    enemyIntentIndex: 0,
+    enemyIntent: first,
+    log: [...state.log, boss.bossPhaseShift.announceLog],
+  };
 }
 
 function skillLabel(classId: ClassId): string {
@@ -72,9 +102,18 @@ function intentLabel(intent: EnemyIntent): string {
   }
 }
 
-export function createInitialCombat(forgeLevel: number, enemyId: EnemyId = THORN_GUARDIAN_ID): CombatSnapshot {
+export function createInitialCombat(
+  forgeLevel: number,
+  enemyId: EnemyId = THORN_GUARDIAN_ID,
+  introHint?: string,
+): CombatSnapshot {
   const def = enemyDef(enemyId);
   const firstIntent = def.intentPattern[0] ?? 'normal';
+  const intro =
+    introHint ??
+    (enemyId === THORN_GUARDIAN_ID || enemyId === 'mist_wolf'
+      ? `${def.name} bloque l'entrée du bastion.`
+      : `${def.name} t'attend dans la forêt.`);
   return {
     heroHp: HERO_BASE_HP,
     heroHpMax: HERO_BASE_HP,
@@ -84,10 +123,11 @@ export function createInitialCombat(forgeLevel: number, enemyId: EnemyId = THORN
     enemyIntent: firstIntent,
     enemyIntentIndex: 0,
     enemyId,
+    enemyPhase: 0,
     concentration: CONCENTRATION_START,
     heroGuarding: false,
     outcome: null,
-    log: [`${def.name} bloque l'entrée du bastion. Intention : ${intentLabel(firstIntent)}.`],
+    log: [`${intro} Intention : ${intentLabel(firstIntent)}.`],
   };
 }
 
@@ -138,10 +178,12 @@ function enemyDamage(
   return raw;
 }
 
-function advanceIntent(def: (typeof ENEMY_DEFS)[EnemyId], index: number): { intent: EnemyIntent; index: number } {
-  const pattern = def.intentPattern;
+function advanceIntent(
+  state: Pick<CombatSnapshot, 'enemyId' | 'enemyPhase' | 'enemyIntentIndex'>,
+): { intent: EnemyIntent; index: number } {
+  const pattern = intentPatternFor(state);
   if (!pattern.length) return { intent: 'normal', index: 0 };
-  const nextIndex = (index + 1) % pattern.length;
+  const nextIndex = (state.enemyIntentIndex + 1) % pattern.length;
   return { intent: pattern[nextIndex] ?? 'normal', index: nextIndex };
 }
 
@@ -171,6 +213,7 @@ export function applyPlayerAction(
     const res = applyDamageToEnemy(next.enemyHp, dmg, next.enemyIntent);
     next.enemyHp = res.hp;
     next.log.push(`Tu frappes pour ${res.dealt} dégâts.`);
+    Object.assign(next, maybeAdvanceBossPhase(next));
     lastFx = 'hit';
   } else if (action === 'defend') {
     next.heroGuarding = true;
@@ -189,6 +232,7 @@ export function applyPlayerAction(
         const res = applyDamageToEnemy(next.enemyHp, dmg, next.enemyIntent);
         next.enemyHp = res.hp;
         next.log.push(`${label} : ${res.dealt} dégâts précis.`);
+        Object.assign(next, maybeAdvanceBossPhase(next));
         lastFx = 'hit';
         break;
       }
@@ -199,7 +243,7 @@ export function applyPlayerAction(
         lastFx = 'defend';
         break;
       case 'sage': {
-        const heal = 6;
+        const heal = 8;
         const before = next.heroHp;
         next.heroHp = Math.min(next.heroHpMax, next.heroHp + heal);
         next.log.push(`${label} : +${next.heroHp - before} PV.`);
@@ -210,6 +254,7 @@ export function applyPlayerAction(
         const res = applyDamageToEnemy(next.enemyHp, dmg, next.enemyIntent);
         next.enemyHp = res.hp;
         next.log.push(`${label} : ${res.dealt} dégâts (bonus forge).`);
+        Object.assign(next, maybeAdvanceBossPhase(next));
         lastFx = 'hit';
         break;
       }
@@ -253,7 +298,7 @@ export function applyPlayerAction(
     return next;
   }
 
-  const advanced = advanceIntent(def, next.enemyIntentIndex);
+  const advanced = advanceIntent(next);
   next.enemyIntent = advanced.intent;
   next.enemyIntentIndex = advanced.index;
   next.turnNumber += 1;
