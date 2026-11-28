@@ -4,6 +4,8 @@ export interface DiversDaySlotsRow {
   localDate: string;
   slot0ActivityId: string;
   slot1ActivityId: string;
+  slot0Passed: boolean;
+  slot1Passed: boolean;
   replacementsUsed: number;
   createdAt: string;
   updatedAt: string;
@@ -26,6 +28,8 @@ function mapSlots(r: Record<string, unknown>): DiversDaySlotsRow {
     localDate: String(r.local_date),
     slot0ActivityId: String(r.slot0_activity_id),
     slot1ActivityId: String(r.slot1_activity_id),
+    slot0Passed: Number(r.slot0_passed ?? 0) === 1,
+    slot1Passed: Number(r.slot1_passed ?? 0) === 1,
     replacementsUsed: Number(r.replacements_used),
     createdAt: String(r.created_at),
     updatedAt: String(r.updated_at),
@@ -60,22 +64,28 @@ export async function upsertDaySlots(
     localDate: string;
     slot0ActivityId: string;
     slot1ActivityId: string;
+    slot0Passed?: boolean;
+    slot1Passed?: boolean;
     replacementsUsed: number;
     createdAt: string;
     updatedAt: string;
   },
 ): Promise<void> {
   await db.runAsync(
-    `INSERT INTO divers_day_slots (local_date, slot0_activity_id, slot1_activity_id, replacements_used, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?)
+    `INSERT INTO divers_day_slots (local_date, slot0_activity_id, slot1_activity_id, slot0_passed, slot1_passed, replacements_used, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(local_date) DO UPDATE SET
        slot0_activity_id = excluded.slot0_activity_id,
        slot1_activity_id = excluded.slot1_activity_id,
+       slot0_passed = excluded.slot0_passed,
+       slot1_passed = excluded.slot1_passed,
        replacements_used = excluded.replacements_used,
        updated_at = excluded.updated_at`,
     row.localDate,
     row.slot0ActivityId,
     row.slot1ActivityId,
+    row.slot0Passed ? 1 : 0,
+    row.slot1Passed ? 1 : 0,
     row.replacementsUsed,
     row.createdAt,
     row.updatedAt,
@@ -195,4 +205,33 @@ export async function getDaySlotsBefore(db: SqlRunner, localDate: string): Promi
     localDate,
   );
   return r ? mapSlots(r) : null;
+}
+
+export async function findActiveCompletionForActivity(
+  db: SqlRunner,
+  localDate: string,
+  activityId: string,
+): Promise<DiversCompletionRow | null> {
+  const r = await db.getFirstAsync<Record<string, unknown>>(
+    `SELECT * FROM divers_completions WHERE local_date = ? AND activity_id = ? AND status = 'active'
+     ORDER BY confirmed_at ASC, rowid ASC LIMIT 1`,
+    localDate,
+    activityId,
+  );
+  return r ? mapCompletion(r) : null;
+}
+
+/** Première confirmation (tous statuts) d'une activité pour un jour : seule candidate à une récompense. */
+export async function getFirstCompletionForActivity(
+  db: SqlRunner,
+  localDate: string,
+  activityId: string,
+): Promise<DiversCompletionRow | null> {
+  const r = await db.getFirstAsync<Record<string, unknown>>(
+    `SELECT * FROM divers_completions WHERE local_date = ? AND activity_id = ?
+     ORDER BY confirmed_at ASC, rowid ASC LIMIT 1`,
+    localDate,
+    activityId,
+  );
+  return r ? mapCompletion(r) : null;
 }

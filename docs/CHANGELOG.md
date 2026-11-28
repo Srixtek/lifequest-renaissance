@@ -1,5 +1,12 @@
 # Changelog
 
+## V1-04B-1 — Trois missions du jour (Habitudes)
+
+- Habitudes : bloc « Trois missions du jour » (Sport pompes/marche si objectif défini, Appeler un proche, Divers, Souffle). Offres figées par date logique du profil, 1 remplacement non accepté par jour, accepter AVANT l'action, réclamer ensuite. Or via `wallet_ledger` et plafond 50 or/jour partagé (UTC) : moteur `renewableQuestService` inchangé, aucun second paiement.
+- Preuves relues à l'acceptation ET à la réclamation (même transaction) ; attribution durable dans `quest_evidence_claims`. Annuler / réécrire une preuve déjà récompensée est refusé (Sport, Proches, Divers) ; correction descriptive (note) toujours permise.
+- Divers : « Passer » masque la suggestion sans en créer une autre ni consommer le remplacement ; une activité n'a qu'une confirmation active par jour, seule la première confirmation du jour est récompensable.
+- Migration 017 (additive) : `daily_quest_sets`, `daily_quest_offers`, `quest_evidence_claims`, colonnes `slot0_passed` / `slot1_passed`. Incluses dans la sauvegarde `.lqbackup`.
+
 ## V1-03A — Sport : performances, séances, records, objectifs progressifs
 
 - Habitudes → Sport : fiche avec activités Pompes / Marche / Course / Séance libre, « Enregistrer une séance », séances multiples par jour (nombre, total, meilleure séance, durée et distance totales), records par activité recalculés, objectif versionné, suggestion d'objectif jamais automatique, historique, correction et annulation tracées. Voir `docs/SPORT_TRACKER.md`.

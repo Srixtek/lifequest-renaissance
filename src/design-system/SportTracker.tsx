@@ -81,6 +81,7 @@ const ERROR_TEXT: Record<string, string> = {
   below_target: '« Atteint » demande une performance au moins égale à l\'objectif : choisis « Échoué » (ta performance est conservée) ou corrige la valeur.',
   not_found: 'Cette séance n\'existe plus.',
   cancelled: 'Cette séance est déjà annulée.',
+  rewarded: 'Cette entrée a déjà servi à une récompense de mission : elle ne peut plus être annulée ni modifiée (seule la note reste modifiable).',
 };
 
 function shortDate(localDate: string): string {
@@ -372,7 +373,7 @@ export function SportTracker() {
       setMsg(
         r.ok
           ? 'Séance annulée. Elle n\'est plus comptée (totaux, records), mais reste dans l\'historique des corrections.'
-          : ERROR_TEXT[r.code === 'already_cancelled' ? 'cancelled' : 'not_found'],
+          : ERROR_TEXT[r.code === 'already_cancelled' ? 'cancelled' : r.code === 'rewarded' ? 'rewarded' : 'not_found'],
       );
     });
 

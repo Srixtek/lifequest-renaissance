@@ -42,6 +42,21 @@ function SuggestionCard({
   onReplace: () => void;
 }) {
   const a = slot.activity;
+  if (slot.passed) {
+    return (
+      <View style={[styles.suggestion, styles.entryOff]}>
+        <Text style={styles.suggestionTitle}>{a.title} — ignorée aujourd'hui</Text>
+        <Text style={styles.small}>
+          Masquée pour la journée, sans pénalité. {canReplace ? '« Remplacer » donne une autre idée (1 fois par jour).' : 'Remplacement du jour déjà utilisé.'}
+        </Text>
+        {canReplace ? (
+          <View style={styles.actions}>
+            <Button label="Remplacer" variant="secondary" compact onPress={onReplace} disabled={busy} />
+          </View>
+        ) : null}
+      </View>
+    );
+  }
   return (
     <View style={styles.suggestion}>
       <Text style={styles.suggestionTitle}>{a.title}</Text>
@@ -148,7 +163,11 @@ export function DiversTracker() {
       const db = await getDb();
       const r = await confirmDiversActivity(db, activityId, requestIdFor(activityId));
       if (!r.ok) {
-        setMsg('Cette suggestion n\'est plus affichée : rafraîchis l\'écran.');
+        setMsg(
+          r.code === 'passed'
+            ? 'Suggestion ignorée aujourd\'hui : utilise « Remplacer » pour obtenir une autre idée.'
+            : 'Cette suggestion n\'est plus affichée : rafraîchis l\'écran.',
+        );
         await reload();
         return;
       }
@@ -163,7 +182,7 @@ export function DiversTracker() {
       const r = await passDiversSuggestion(db, slotIndex);
       if (r.ok) {
         setDash(r.dashboard);
-        setMsg(null);
+        setMsg('Suggestion ignorée pour aujourd\'hui. « Remplacer » (1 fois par jour) donne une autre idée.');
       }
     });
 
@@ -172,7 +191,13 @@ export function DiversTracker() {
       const db = await getDb();
       const r = await replaceDiversSuggestion(db, slotIndex);
       if (!r.ok) {
-        setMsg(r.code === 'limit_reached' ? 'Un seul remplacement par jour pour le moment.' : 'Remplacement impossible.');
+        setMsg(
+          r.code === 'limit_reached'
+            ? 'Un seul remplacement par jour pour le moment.'
+            : r.code === 'already_done'
+              ? 'Cette activité est déjà confirmée : elle ne peut pas être remplacée.'
+              : 'Remplacement impossible.',
+        );
         return;
       }
       setDash(r.dashboard);
@@ -184,7 +209,13 @@ export function DiversTracker() {
       const db = await getDb();
       const r = await cancelDiversCompletion(db, id);
       if (!r.ok) {
-        setMsg(r.code === 'already_cancelled' ? 'Déjà annulé.' : 'Annulation impossible.');
+        setMsg(
+          r.code === 'already_cancelled'
+            ? 'Déjà annulé.'
+            : r.code === 'rewarded'
+              ? 'Cette confirmation a déjà servi à une récompense de mission : elle ne peut plus être annulée.'
+              : 'Annulation impossible.',
+        );
         return;
       }
       setCancelAsk(null);
@@ -210,7 +241,9 @@ export function DiversTracker() {
         <Body muted>
           Deux idées par jour, sans obligation ni pénalité. Confirme seulement ce que tu as vraiment fait.
         </Body>
-        <Text style={styles.small}>Aucun XP ni récompense : distinct des habitudes « Divers » classiques.</Text>
+        <Text style={styles.small}>
+          Aucun XP direct. L'or ne vient que des « Trois missions du jour » (Habitudes), après acceptation de la mission puis confirmation ici.
+        </Text>
         {msg ? <Text style={styles.msg}>{msg}</Text> : null}
       </FantasyPanel>
 

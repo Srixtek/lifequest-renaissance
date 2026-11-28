@@ -7,6 +7,7 @@ import * as challengeSessionRepo from '../../data/db/repositories/challengeSessi
 import { evaluateQuestProof, type QuestProgress } from './questEvidence';
 import { displayElapsedSec } from './challengeService';
 import { QUESTS, type QuestDef } from '../../data/content/quests';
+import { explainMissingEvidence, findDailyEvidence, type DailyParams } from './dailyQuestEvidence';
 
 type Conn = Db | SqlRunner;
 
@@ -25,6 +26,9 @@ export function parseProgressJson(raw: string | null): {
   proofChallengeSessionId?: string;
   proofCombatVictoryId?: string;
   proofBreathingCopeSessionId?: string;
+  proofEvidenceKey?: string;
+  dailyOfferId?: string;
+  dailyParams?: DailyParams;
   rewardGold?: number;
 } {
   if (!raw) return {};
@@ -292,6 +296,17 @@ export async function evaluateRenewableProof(
       const forge = await kingdomRepo.getForgeLevel(db);
       const up = forge.level > atAccept ? 1 : 0;
       return { current: up, target: 1, label: up ? '1 / 1 amélioration' : '0 / 1 amélioration' };
+    }
+    case 'sport_session':
+    case 'proches_call':
+    case 'divers_activity': {
+      const found = await findDailyEvidence(db, template, acceptedAt, progressMeta.dailyParams);
+      if (found) return { current: 1, target: 1, label: '1 / 1 action vérifiée' };
+      return {
+        current: 0,
+        target: 1,
+        label: await explainMissingEvidence(db, template, acceptedAt, progressMeta.dailyParams),
+      };
     }
     case 'adaptive_vape_complete': {
       const attempts = await adaptiveChallengeRepo.listAttemptsSince(db, acceptedAt);

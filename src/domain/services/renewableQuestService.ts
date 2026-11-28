@@ -7,6 +7,7 @@ import {
   RENEWABLE_BY_ID,
   RENEWABLE_GOLD_DAILY_CAP,
   RENEWABLE_TEMPLATES,
+  isDailyEvidenceProof,
   type RenewableQuestCategory,
   type RenewableQuestTemplate,
 } from '../../data/content/renewableQuestTemplates';
@@ -15,6 +16,8 @@ import * as goalRepo from '../../data/db/repositories/goalRepo';
 import * as kingdomRepo from '../../data/db/repositories/kingdomRepo';
 import * as rpgRepo from '../../data/db/repositories/rpgRepo';
 import { createId } from '../../utils/id';
+import { findDailyEvidence, explainMissingEvidence, type DailyEvidence } from './dailyQuestEvidence';
+import { insertEvidenceClaim } from './questEvidenceClaims';
 import { getSharedGoldEarnedToday, utcDayStart } from './goldDailyCap';
 import {
   evaluateRenewableProof,
@@ -157,11 +160,14 @@ export async function getRenewableQuestBoard(db: Conn): Promise<RenewableQuestBo
     const progress = row.acceptedAt
       ? await evaluateRenewableProof(db, template, acceptedAt, row.progressJson, row.challengeSessionId)
       : { current: 0, target: 1, label: 'Pas commencée' };
+    const meta = parseProgressJson(row.progressJson);
+    if (meta.dailyOfferId && row.status === 'failed') continue;
     let state: RenewableBoardState = row.status;
-    if (row.status === 'active' && renewableProofSatisfied(template, progress, row.status)) {
+    if (isDailyEvidenceProof(template.proof) && (row.status === 'active' || row.status === 'ready')) {
+      state = progress.current >= progress.target && progress.target > 0 ? 'ready' : 'active';
+    } else if (row.status === 'active' && renewableProofSatisfied(template, progress, row.status)) {
       state = 'ready';
     }
-    const meta = parseProgressJson(row.progressJson);
     const timerRunning = meta.timer?.state === 'running';
     const inlineTimer =
       timerRunning && meta.timer
@@ -338,7 +344,10 @@ export async function failRenewableTimer(db: Db, instanceId: string, now = new D
     await tx.runAsync(`UPDATE renewable_quest_instances SET challenge_session_id = NULL WHERE id = ?`, instanceId);
     await renewableQuestRepo.markFailed(tx, instanceId, at);
     const tmpl = RENEWABLE_BY_ID[row.templateId];
-  const replacement = tmpl ? await pickTemplateForCategory(tx, tmpl.category, row.templateId) : null;
+    const replacement =
+      tmpl && !parseProgressJson(row.progressJson).dailyOfferId
+        ? await pickTemplateForCategory(tx, tmpl.category, row.templateId)
+        : null;
     if (replacement) {
       const rows = await renewableQuestRepo.listInstances(tx);
       if (!occupiedTemplateIds(rows).has(replacement.id)) {
@@ -564,6 +573,25 @@ export async function claimRenewableQuest(db: Db, instanceId: string, now = new 
       }
     }
 
+    let dailyEvidence: DailyEvidence | null = null;
+    if (isDailyEvidenceProof(template.proof)) {
+      dailyEvidence = await findDailyEvidence(tx, template, row.acceptedAt, meta.dailyParams);
+      if (!dailyEvidence) {
+        if (status === 'ready') await renewableQuestRepo.revertToActive(tx, instanceId, at);
+        result = {
+          ok: false,
+          message: `Aucune action valide à récompenser. ${await explainMissingEvidence(tx, template, row.acceptedAt, meta.dailyParams)}`,
+        };
+        return;
+      }
+      meta.proofEvidenceKey = dailyEvidence.evidenceKey;
+      progressJson = JSON.stringify(meta);
+      if (status === 'active') {
+        await renewableQuestRepo.markReady(tx, instanceId, progressJson, at);
+        status = 'ready';
+      }
+    }
+
     const progress = await evaluateRenewableProof(tx, template, row.acceptedAt, progressJson, row.challengeSessionId);
     if (status !== 'ready' && !renewableProofSatisfied(template, progress, status)) {
       result = { ok: false, message: 'Objectif pas encore atteint.' };
@@ -579,13 +607,24 @@ export async function claimRenewableQuest(db: Db, instanceId: string, now = new 
     if (earnedToday + payout > RENEWABLE_GOLD_DAILY_CAP) {
       payout = Math.max(0, RENEWABLE_GOLD_DAILY_CAP - earnedToday);
     }
+    if (dailyEvidence) {
+      await insertEvidenceClaim(tx, {
+        id: createId('qec'),
+        evidenceKey: dailyEvidence.evidenceKey,
+        evidenceGroup: dailyEvidence.evidenceGroup,
+        instanceId,
+        source: dailyEvidence.source,
+        goldCredited: payout,
+        claimedAt: at,
+      });
+    }
     if (payout > 0) {
       await rpgRepo.addGold(tx, payout, `Quête « ${template.title} »`, renewableRewardKey(instanceId), at);
     }
     const claimMeta = { ...parseProgressJson(progressJson), rewardGold: payout };
     await renewableQuestRepo.markClaimed(tx, instanceId, at, JSON.stringify(claimMeta));
     await renewableQuestRepo.insertHistory(tx, createId('rqh'), instanceId, template.id, template.category, at);
-    await spawnRenewal(tx, template.category, template.id, at);
+    if (!meta.dailyOfferId) await spawnRenewal(tx, template.category, template.id, at);
     const balance = await rpgRepo.getGoldBalance(tx);
     result = {
       ok: true,
@@ -614,7 +653,9 @@ export async function abandonRenewableQuest(db: Db, instanceId: string, now = ne
     const at = now.toISOString();
     await renewableQuestRepo.markFailed(tx, instanceId, at);
     const tmpl = RENEWABLE_BY_ID[row.templateId];
-    if (tmpl) await spawnRenewal(tx, tmpl.category, row.templateId, at);
+    if (tmpl && !parseProgressJson(row.progressJson).dailyOfferId) {
+      await spawnRenewal(tx, tmpl.category, row.templateId, at);
+    }
     result = { ok: true, message: 'Quête retirée du carnet.' };
   });
   return result;

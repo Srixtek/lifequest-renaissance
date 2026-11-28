@@ -6,6 +6,7 @@ import * as goalRepo from '../../data/db/repositories/goalRepo';
 import * as profileRepo from '../../data/db/repositories/profileRepo';
 import { categoryForGoal } from '../../data/content/habitCategories';
 import { createId } from '../../utils/id';
+import { isEvidencePaid } from './questEvidenceClaims';
 import { alcoholLogicalDate, weekBounds } from '../rules/alcohol';
 import {
   SPORT_ACTIVITIES,
@@ -238,7 +239,7 @@ export async function addSession(db: Db, input: AddSessionInput, opts: SportOpts
 
 export type EditSessionResult =
   | { ok: true; session: SportSession; changed: boolean }
-  | { ok: false; code: 'not_found' | 'cancelled' | SessionErrorCode };
+  | { ok: false; code: 'not_found' | 'cancelled' | 'rewarded' | SessionErrorCode };
 
 /**
  * Correction : quantité, durée, distance, date, note, résultat. L'état précédent est conservé dans la trace d'audit.
@@ -303,6 +304,16 @@ export async function editSession(
       result = { ok: true, session: cur, changed: false };
       return;
     }
+    const proofChanged =
+      cur.performedAt !== row.performedAt ||
+      cur.reps !== row.reps ||
+      cur.durationSec !== row.durationSec ||
+      cur.distanceM !== row.distanceM ||
+      cur.outcome !== row.outcome;
+    if (proofChanged && (await isEvidencePaid(tx, `sport_session:${id}`))) {
+      result = { ok: false, code: 'rewarded' };
+      return;
+    }
     await sportRepo.insertCorrection(tx, {
       id: createId('scr'),
       sessionId: id,
@@ -326,7 +337,7 @@ export async function editSession(
   return result;
 }
 
-export type CancelSessionResult = { ok: true } | { ok: false; code: 'not_found' | 'already_cancelled' };
+export type CancelSessionResult = { ok: true } | { ok: false; code: 'not_found' | 'already_cancelled' | 'rewarded' };
 
 /** Annulation logique : la séance et son audit restent en base ; elle sort des totaux, records et preuves. */
 export async function cancelSession(db: Db, id: string, opts: SportOpts = {}): Promise<CancelSessionResult> {
@@ -337,6 +348,10 @@ export async function cancelSession(db: Db, id: string, opts: SportOpts = {}): P
     if (!cur) return;
     if (cur.status === 'cancelled') {
       result = { ok: false, code: 'already_cancelled' };
+      return;
+    }
+    if (await isEvidencePaid(tx, `sport_session:${id}`)) {
+      result = { ok: false, code: 'rewarded' };
       return;
     }
     const at = ctx.now.toISOString();

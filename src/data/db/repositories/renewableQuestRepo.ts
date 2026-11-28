@@ -120,6 +120,15 @@ export async function markFailed(db: Conn, id: string, at: string): Promise<bool
   return r.changes === 1;
 }
 
+export async function revertToActive(db: Conn, id: string, at: string): Promise<boolean> {
+  const r = await db.runAsync(
+    `UPDATE renewable_quest_instances SET status = 'active', updated_at = ? WHERE id = ? AND status = 'ready'`,
+    at,
+    id,
+  );
+  return r.changes === 1;
+}
+
 export async function markClaimed(db: Conn, id: string, claimedAt: string, progressJson: string): Promise<boolean> {
   const r = await db.runAsync(
     `UPDATE renewable_quest_instances SET status = 'claimed', claimed_at = ?, progress_json = ?, updated_at = ?

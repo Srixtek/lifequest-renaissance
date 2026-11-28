@@ -56,6 +56,7 @@ const ERROR_TEXT: Record<string, string> = {
   future_time: 'Cette heure est dans le futur.',
   not_found: 'Cette entrée n\'existe plus.',
   cancelled: 'Cette entrée est déjà annulée.',
+  rewarded: 'Cette entrée a déjà servi à une récompense de mission : elle ne peut plus être annulée ni modifiée (seule la note reste modifiable).',
   invalid_name: 'Indique un nom ou un surnom.',
   invalid_goal: 'Objectif invalide : choisis entre 1 et 7 appels.',
 };
