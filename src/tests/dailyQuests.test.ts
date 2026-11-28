@@ -18,7 +18,10 @@ import {
   abandonRenewableQuest,
   claimRenewableQuest,
   getRenewableQuestBoard,
+  startRenewableTimer,
+  succeedRenewableTimer,
 } from '../domain/services/renewableQuestService';
+import { resolveDailyOpenRoute } from '../domain/services/dailyQuestNavigation';
 import {
   cancelDiversCompletion,
   confirmDiversActivity,
@@ -506,6 +509,102 @@ suite('V1-04B-1 — Trois missions du jour', () => {
     } finally {
       target.close();
     }
+  });
+
+  test('R1. respiration acceptée : navigation vers la carte quête avec instanceId', async () => {
+    const inst = await acceptOne('rnw_breathe_calm');
+    const c = await card(T_ACCEPT, 'rnw_breathe_calm');
+    expect(c).toBeTruthy();
+    const route = resolveDailyOpenRoute(c!);
+    expect(route).toEqual({ kind: 'adventure', tab: 'quests', instanceId: inst });
+  });
+
+  test('R2. respiration : durée insuffisante puis chrono validé et réclamation unique', async () => {
+    const inst = await acceptOne('rnw_breathe_calm');
+    expect((await startRenewableTimer(t.db, inst)).ok).toBe(true);
+    const tooSoon = await succeedRenewableTimer(t.db, inst);
+    expect(tooSoon.ok).toBe(false);
+    expect(tooSoon.message).toMatch(/Encore .* s/);
+    const past = new Date(Date.now() - 120_000).toISOString();
+    await t.db.runAsync(
+      `UPDATE renewable_quest_instances SET progress_json = ? WHERE id = ?`,
+      JSON.stringify({
+        timer: { kind: 'breathing', startedUtc: past, targetSec: 60, state: 'running' },
+        dailyOfferId: offerId(D1, 'rnw_breathe_calm'),
+      }),
+      inst,
+    );
+    expect((await succeedRenewableTimer(t.db, inst, at(T_CLAIM))).ok).toBe(true);
+    expect((await card(T_CLAIM, 'rnw_breathe_calm'))?.state).toBe('ready');
+    const r = await claim(inst);
+    expect(r).toMatchObject({ ok: true, gold: 6 });
+    expect(await claim(inst)).toMatchObject({ ok: false });
+    expect(await goldSum()).toBe(6);
+    const st = await t.db.getFirstAsync<{ status: string }>(`SELECT status FROM renewable_quest_instances WHERE id = ?`, inst);
+    expect(st?.status).toBe('claimed');
+  });
+
+  test('R3. Sport : séance sur une autre métrique que la mission refusée', async () => {
+    const goalWalk = await setSportGoal(
+      t.db,
+      { activityId: 'walking', metric: 'duration_sec', target: 1800 },
+      o('2026-03-10T10:00:00.000Z'),
+    );
+    if (!goalWalk.ok || !goalWalk.goal) throw new Error('goal walk');
+    await forceSet(D1, [
+      {
+        id: 'dq_sport_walking',
+        params: {
+          activityId: 'walking',
+          goalId: goalWalk.goal.id,
+          goalMetric: 'duration_sec',
+          goalTarget: 1800,
+        },
+      },
+      { id: 'dq_proches_call' },
+    ]);
+    const acc = await acceptDailyQuest(t.db, offerId(D1, 'dq_sport_walking'), o(T_ACCEPT));
+    if (!acc.ok) throw new Error(acc.message);
+    const distGoal = await setSportGoal(t.db, { activityId: 'walking', metric: 'distance_m', target: 5000 }, o(T_ACT));
+    if (!distGoal.ok || !distGoal.goal) throw new Error('goal dist');
+    const v = validateSessionForm({
+      activityId: 'walking',
+      reps: '',
+      durationMin: '',
+      distanceKm: '5',
+      freeMetric: 'reps',
+      disciplineName: '',
+      note: '',
+    });
+    if (!v.ok) throw new Error('walk form');
+    const s = await addSession(
+      t.db,
+      { session: v.value, performedAt: at(T_ACT), outcome: 'achieved', goalId: distGoal.goal.id },
+      o(T_ACT),
+    );
+    expect(s.ok).toBe(true);
+    expect((await claim(acc.instanceId)).ok).toBe(false);
+    const progress = (await card(T_CLAIM, 'dq_sport_walking'))?.progress?.label ?? '';
+    expect(progress).toMatch(/autre métrique|pas encore|objectif/);
+  });
+
+  test('R4. Sport : objectif abaissé après acceptation — 10 reps ne valide pas une mission à 20', async () => {
+    const goalId = await setGoal20();
+    const inst = await acceptSport(goalId);
+    const lowered = await setSportGoal(t.db, { activityId: 'pushups', metric: 'reps', target: 10 }, o(T_ACT));
+    if (!lowered.ok || !lowered.goal) throw new Error('lower');
+    await logSport('10', 'achieved', lowered.goal.id);
+    expect((await claim(inst)).ok).toBe(false);
+  });
+
+  test('R5. Sport : objectif abaissé — 20 reps achieved valide encore la mission figée à 20', async () => {
+    const goalId = await setGoal20();
+    const inst = await acceptSport(goalId);
+    const lowered = await setSportGoal(t.db, { activityId: 'pushups', metric: 'reps', target: 10 }, o(T_ACT));
+    if (!lowered.ok || !lowered.goal) throw new Error('lower');
+    await logSport('20', 'achieved', lowered.goal.id);
+    expect((await card(T_CLAIM, 'dq_sport_pushups'))?.state).toBe('ready');
+    expect((await claim(inst))).toMatchObject({ ok: true, gold: 10 });
   });
 
   test('20. quêtes historiques inchangées : le carnet générique ne propose pas les missions du jour', async () => {

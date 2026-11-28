@@ -17,7 +17,11 @@ import {
   type DailyQuestCard,
 } from '../domain/services/dailyQuestService';
 import { abandonRenewableQuest, claimRenewableQuest } from '../domain/services/renewableQuestService';
+import { resolveDailyOpenRoute, type DailyOpenRoute } from '../domain/services/dailyQuestNavigation';
 import { friendlyDbError } from '../utils/dbErrors';
+
+export type { DailyCategoryTarget, DailyOpenRoute } from '../domain/services/dailyQuestNavigation';
+export { resolveDailyOpenRoute } from '../domain/services/dailyQuestNavigation';
 
 const BADGE: Record<DailyCardState, { label: string; color: string }> = {
   offered: { label: 'Disponible', color: colors.muted },
@@ -37,21 +41,6 @@ const OUTCOME_LABEL: Record<DailyHistoryEntry['outcome'], string> = {
   ready: 'Prête',
   offered: 'Proposée',
 };
-
-export type DailyActivityTarget = 'sport' | 'proches' | 'divers' | 'adventure';
-
-function activityTarget(card: DailyQuestCard): DailyActivityTarget {
-  switch (card.template.proof) {
-    case 'sport_session':
-      return 'sport';
-    case 'proches_call':
-      return 'proches';
-    case 'divers_activity':
-      return 'divers';
-    default:
-      return 'adventure';
-  }
-}
 
 function MissionCard({
   card,
@@ -146,7 +135,7 @@ function MissionCard({
   );
 }
 
-export function DailyQuestsBlock({ onOpenActivity }: { onOpenActivity: (target: DailyActivityTarget) => void }) {
+export function DailyQuestsBlock({ onOpenActivity }: { onOpenActivity: (route: DailyOpenRoute) => void }) {
   const [block, setBlock] = useState<DailyQuestBlock | null>(null);
   const [history, setHistory] = useState<DailyHistoryEntry[]>([]);
   const [msg, setMsg] = useState<string | null>(null);
@@ -253,7 +242,7 @@ export function DailyQuestsBlock({ onOpenActivity }: { onOpenActivity: (target: 
           onReplace={() => void replace(c)}
           onClaim={() => void claim(c)}
           onAbandon={() => void abandon(c)}
-          onOpen={() => onOpenActivity(activityTarget(c))}
+          onOpen={() => onOpenActivity(resolveDailyOpenRoute(c))}
         />
       ))}
       <Text style={styles.small}>
