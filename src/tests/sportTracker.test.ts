@@ -729,7 +729,7 @@ suite('V1-03A — journal Sport (SQLite réel, node:sqlite)', () => {
     expect(await dump()).toEqual(before);
 
     const versions = (await t.db.getAllAsync<{ version: number }>(`SELECT version FROM schema_migrations ORDER BY version`)).map((r) => r.version);
-    expect(versions).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]);
+    expect(versions).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]);
     const names = (await t.db.getAllAsync<{ name: string }>(`SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'sport_%' ORDER BY name`)).map((r) => r.name);
     expect(names).toEqual(['sport_activities', 'sport_corrections', 'sport_events', 'sport_goals', 'sport_sessions']);
     expect((await t.db.getAllAsync<{ id: string }>(`SELECT id FROM sport_activities ORDER BY sort_order`)).map((r) => r.id)).toEqual([

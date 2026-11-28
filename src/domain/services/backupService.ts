@@ -59,10 +59,16 @@ const TABLES = [
   'daily_quest_sets',
   'daily_quest_offers',
   'quest_evidence_claims',
+  'weekly_quest_sets',
+  'weekly_quest_offers',
+  'quest_evidence_allocations',
 ] as const;
 
 /** Ordre enfants → parents (FK) pour un vidage sans orphelins. */
 const WIPE_ORDER: readonly string[] = [
+  'quest_evidence_allocations',
+  'weekly_quest_offers',
+  'weekly_quest_sets',
   'quest_evidence_claims',
   'daily_quest_offers',
   'daily_quest_sets',

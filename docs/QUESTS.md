@@ -31,3 +31,11 @@
 8. Redémarrer l'app : acceptées / terminées / or conservés.
 9. Clairière : répéter « Cueillir » / « Kit » : l'inventaire n'augmente pas.
 10. XP et éclats inchangés après une réclamation.
+
+## Missions de la semaine (V1-04B-2, migration 018)
+- Bloc « Missions de la semaine » dans Habitudes, après les missions du jour : 2 offres par semaine (lundi → dimanche, date logique du profil), 1 remplacement/semaine avant acceptation, 1 seule mission hebdomadaire acceptée à la fois, partageant les 3 emplacements actifs.
+- Modèles : « Les pas de la semaine » (3 marches ≥ 10 min, durée renseignée, 20 or), « Garder le lien » (2 appels distincts, 16 or), « Les petites victoires » (2 activités Divers différentes, 14 or).
+- Preuves : après acceptation, dans la semaine (réalisées ET enregistrées), non annulées, distinctes, non consommées. Table `quest_evidence_allocations` (plusieurs preuves par instance, `evidence_key` et `evidence_group` UNIQUE), lue avec `quest_evidence_claims` par `isEvidencePaid` / `isEvidenceGroupPaid`.
+- Réclamation : transaction exclusive, relecture de toutes les preuves, allocations + or (`renewable:<id>:reward`, plafond partagé 50 or/jour) + statut. Preuve consommée : non annulable ni modifiable de façon incompatible.
+- Échéance : offre non acceptée → expirée ; mission incomplète → échouée sans pénalité ; mission complète avant l'échéance → réclamable ensuite.
+- Sauvegarde : `weekly_quest_sets`, `weekly_quest_offers`, `quest_evidence_allocations` dans `.lqbackup`.

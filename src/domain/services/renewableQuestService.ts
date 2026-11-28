@@ -161,6 +161,7 @@ export async function getRenewableQuestBoard(db: Conn): Promise<RenewableQuestBo
       ? await evaluateRenewableProof(db, template, acceptedAt, row.progressJson, row.challengeSessionId)
       : { current: 0, target: 1, label: 'Pas commencée' };
     const meta = parseProgressJson(row.progressJson);
+    if (meta.weeklyOfferId) continue;
     if (meta.dailyOfferId && row.status === 'failed') continue;
     let state: RenewableBoardState = row.status;
     if (isDailyEvidenceProof(template.proof) && (row.status === 'active' || row.status === 'ready')) {
@@ -239,6 +240,7 @@ export async function refreshRenewableState(db: Db, instanceId: string, now = ne
   await db.withExclusiveTransactionAsync(async (tx) => {
     const row = await renewableQuestRepo.getInstance(tx, instanceId);
     if (!row || !row.acceptedAt || row.status !== 'active') return;
+    if (parseProgressJson(row.progressJson).weeklyOfferId) return;
     const template = RENEWABLE_BY_ID[row.templateId];
     if (!template) return;
     const progress = await evaluateRenewableProof(tx, template, row.acceptedAt, row.progressJson, row.challengeSessionId);
@@ -332,6 +334,7 @@ export async function failRenewableTimer(db: Db, instanceId: string, now = new D
   await db.withExclusiveTransactionAsync(async (tx) => {
     const row = await renewableQuestRepo.getInstance(tx, instanceId);
     if (!row || row.status !== 'active') return;
+    if (parseProgressJson(row.progressJson).weeklyOfferId) return;
     if (row.challengeSessionId) {
       const session = await challengeSessionRepo.getById(tx, row.challengeSessionId);
       if (session?.state === 'running') {
@@ -530,6 +533,10 @@ export async function claimRenewableQuest(db: Db, instanceId: string, now = new 
       result = { ok: false, message: 'Quête non acceptée.' };
       return;
     }
+    if (parseProgressJson(row.progressJson).weeklyOfferId) {
+      result = { ok: false, message: 'Mission de la semaine : réclame-la depuis « Missions de la semaine ».' };
+      return;
+    }
     const template = RENEWABLE_BY_ID[row.templateId];
     if (!template) return;
     const at = now.toISOString();
@@ -642,6 +649,10 @@ export async function abandonRenewableQuest(db: Db, instanceId: string, now = ne
     const row = await renewableQuestRepo.getInstance(tx, instanceId);
     if (!row || (row.status !== 'active' && row.status !== 'ready')) {
       result = { ok: false, message: 'Quête non abandonnable.' };
+      return;
+    }
+    if (parseProgressJson(row.progressJson).weeklyOfferId) {
+      result = { ok: false, message: 'Mission de la semaine : abandonne-la depuis « Missions de la semaine ».' };
       return;
     }
     if (row.challengeSessionId) {
