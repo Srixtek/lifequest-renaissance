@@ -1,0 +1,122 @@
+name: Android QA APK
+
+on:
+  push:
+    branches:
+      - v1/qa-android-build
+  workflow_dispatch:
+
+concurrency:
+  group: android-qa-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-qa-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      LIFEQUEST_RELEASE_SIGNING: debug
+      QA_PACKAGE: lifequest.renaissance.qa
+      QA_VERSION: 0.2.0-preview.11-qa
+      QA_VERSION_CODE: "12"
+      QA_APP_NAME: LifeQuest Renaissance QA
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK components
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-35" \
+            "platforms;android-36" \
+            "build-tools;35.0.0" \
+            "build-tools;36.0.0" \
+            "ndk;27.1.12297006"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Apply QA overlay (ephemeral, not committed)
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const path = 'app.json';
+          const cfg = JSON.parse(fs.readFileSync(path, 'utf8'));
+          const before = {
+            name: cfg.expo.name,
+            version: cfg.expo.version,
+            package: cfg.expo.android.package,
+            versionCode: cfg.expo.android.versionCode,
+          };
+          cfg.expo.name = process.env.QA_APP_NAME;
+          cfg.expo.version = process.env.QA_VERSION;
+          cfg.expo.android.package = process.env.QA_PACKAGE;
+          cfg.expo.android.versionCode = Number(process.env.QA_VERSION_CODE);
+          fs.writeFileSync(path, JSON.stringify(cfg, null, 2) + '\n');
+          console.log('QA overlay applied:', { before, after: {
+            name: cfg.expo.name,
+            version: cfg.expo.version,
+            package: cfg.expo.android.package,
+            versionCode: cfg.expo.android.versionCode,
+          }});
+          NODE
+        env:
+          QA_APP_NAME: ${{ env.QA_APP_NAME }}
+          QA_VERSION: ${{ env.QA_VERSION }}
+          QA_PACKAGE: ${{ env.QA_PACKAGE }}
+          QA_VERSION_CODE: ${{ env.QA_VERSION_CODE }}
+
+      - name: Build release APK (debug signing)
+        run: npm run build:apk
+
+      - name: Verify APK identity and signature
+        run: |
+          set -euo pipefail
+          APK="android/app/build/outputs/apk/release/app-release.apk"
+          if [[ ! -f "$APK" ]]; then
+            echo "Missing APK: $APK" >&2
+            exit 1
+          fi
+          BT="$(ls -d "$ANDROID_HOME/build-tools"/* | sort -V | tail -1)"
+          AAPT="$BT/aapt"
+          APKSIGNER="$BT/apksigner"
+          echo "=== aapt badging ==="
+          "$AAPT" dump badging "$APK" | tee /tmp/apk-badging.txt
+          grep -q "package: name='${QA_PACKAGE}'" /tmp/apk-badging.txt
+          grep -q "versionCode='${QA_VERSION_CODE}'" /tmp/apk-badging.txt
+          grep -q "versionName='${QA_VERSION}'" /tmp/apk-badging.txt
+          echo "=== apksigner ==="
+          "$APKSIGNER" verify --min-sdk-version 24 "$APK"
+          "$APKSIGNER" verify --print-certs "$APK" | tee /tmp/apk-certs.txt
+          cp "$APK" lifequest-preview11-qa.apk
+          ls -la lifequest-preview11-qa.apk
+        env:
+          QA_PACKAGE: ${{ env.QA_PACKAGE }}
+          QA_VERSION: ${{ env.QA_VERSION }}
+          QA_VERSION_CODE: ${{ env.QA_VERSION_CODE }}
+
+      - name: Upload QA APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lifequest-preview11-qa
+          path: lifequest-preview11-qa.apk
+          if-no-files-found: error
+          retention-days: 14
