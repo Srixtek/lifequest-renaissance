@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   build-qa-apk:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
       LIFEQUEST_RELEASE_SIGNING: debug
@@ -37,18 +37,16 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - name: Configure Android SDK (runner image)
-        run: |
-          echo "ANDROID_HOME=${ANDROID_SDK_ROOT}" >> "$GITHUB_ENV"
-          echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT}" >> "$GITHUB_ENV"
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager \
-            "platform-tools" \
-            "platforms;android-35" \
-            "platforms;android-36" \
-            "build-tools;35.0.0" \
-            "build-tools;36.0.0" \
-            "ndk;27.1.12297006"
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: >-
+            platform-tools
+            platforms;android-35
+            platforms;android-36
+            build-tools;35.0.0
+            build-tools;36.0.0
+            ndk;27.1.12297006
 
       - name: Install dependencies
         run: npm ci
