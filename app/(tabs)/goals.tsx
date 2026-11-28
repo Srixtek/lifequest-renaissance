@@ -42,6 +42,7 @@ import { AlcoholTracker } from '@/src/design-system/AlcoholTracker';
 import { SportTracker } from '@/src/design-system/SportTracker';
 import { ProchesTracker } from '@/src/design-system/ProchesTracker';
 import { DiversTracker } from '@/src/design-system/DiversTracker';
+import { DailyQuestsBlock } from '@/src/design-system/DailyQuestsBlock';
 
 const STATUS_FR: Record<TrackingStatus, string> = {
   unknown: 'Non renseigné',
@@ -356,6 +357,15 @@ export default function GoalsScreen() {
 
         {mode === 'challenges' ? (
           <Text style={styles.sectionHeading}>Défis liés à tes habitudes</Text>
+        ) : null}
+
+        {mode === 'track' && !inCategory ? (
+          <DailyQuestsBlock
+            onOpenActivity={(target) => {
+              if (target === 'adventure') router.push('/(tabs)/adventure');
+              else setCategoryId(target);
+            }}
+          />
         ) : null}
 
         {mode === 'track' && !inCategory ? (

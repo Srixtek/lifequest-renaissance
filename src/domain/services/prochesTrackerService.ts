@@ -14,6 +14,7 @@ import {
 } from '../rules/proches';
 import { addDays } from '../rules/dates';
 import { createId } from '../../utils/id';
+import { isEvidencePaid } from './questEvidenceClaims';
 
 /**
  * Journal Proches V1-03B. Aucune écriture XP / or / quêtes / tracking call_family : le suivi historique reste séparé.
@@ -251,7 +252,7 @@ export async function addCall(db: Db, input: AddCallInput, opts: ProchesOpts = {
 
 export type EditCallResult =
   | { ok: true; call: ProchesCall; changed: boolean }
-  | { ok: false; code: 'not_found' | 'cancelled' | 'invalid_time' | 'future_time' };
+  | { ok: false; code: 'not_found' | 'cancelled' | 'rewarded' | 'invalid_time' | 'future_time' };
 
 export async function editCall(
   db: Db,
@@ -286,6 +287,10 @@ export async function editCall(
       result = { ok: true, call: cur, changed: false };
       return;
     }
+    if (cur.calledAt !== row.calledAt && (await isEvidencePaid(tx, `proches_call:${id}`))) {
+      result = { ok: false, code: 'rewarded' };
+      return;
+    }
     await prochesRepo.insertCorrection(tx, {
       id: createId('pcr'),
       callId: id,
@@ -308,7 +313,7 @@ export async function editCall(
   return result;
 }
 
-export type CancelCallResult = { ok: true } | { ok: false; code: 'not_found' | 'already_cancelled' };
+export type CancelCallResult = { ok: true } | { ok: false; code: 'not_found' | 'already_cancelled' | 'rewarded' };
 
 export async function cancelCall(db: Db, id: string, opts: ProchesOpts = {}): Promise<CancelCallResult> {
   let result: CancelCallResult = { ok: false, code: 'not_found' };
@@ -318,6 +323,10 @@ export async function cancelCall(db: Db, id: string, opts: ProchesOpts = {}): Pr
     if (!cur) return;
     if (cur.status === 'cancelled') {
       result = { ok: false, code: 'already_cancelled' };
+      return;
+    }
+    if (await isEvidencePaid(tx, `proches_call:${id}`)) {
+      result = { ok: false, code: 'rewarded' };
       return;
     }
     const at = ctx.now.toISOString();

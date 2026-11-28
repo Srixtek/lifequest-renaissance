@@ -13,10 +13,14 @@ import {
 import { alcoholLogicalDate } from '../rules/alcohol';
 import { addDays } from '../rules/dates';
 import { createId } from '../../utils/id';
+import { isEvidencePaid } from './questEvidenceClaims';
 
 /**
  * Journal Divers V1-04A — petites activités facultatives.
- * Aucune écriture XP / or / quêtes. Preuves via listDiversEvidence pour usage futur.
+ * Ce service n'écrit aucun XP / or. Les récompenses passent uniquement par les missions du jour
+ * (moteur de quêtes renouvelables), qui lisent ces confirmations comme preuves.
+ * « Passer » masque la suggestion du jour (sans en créer une autre) ; « Remplacer » (1/jour) est la seule
+ * action qui donne une nouvelle proposition.
  */
 
 export interface DiversOpts {
@@ -129,6 +133,20 @@ export interface DiversSuggestionSlot {
   slotIndex: 0 | 1;
   activityId: string;
   activity: DiversActivityDef;
+  /** Ignorée aujourd'hui : masquée, non confirmable ; seul « Remplacer » donne une autre proposition. */
+  passed: boolean;
+}
+
+function suggestionsFromSlots(slots: DiversDaySlotsRow): DiversSuggestionSlot[] {
+  const out: DiversSuggestionSlot[] = [];
+  for (const [idx, activityId, passed] of [
+    [0, slots.slot0ActivityId, slots.slot0Passed],
+    [1, slots.slot1ActivityId, slots.slot1Passed],
+  ] as const) {
+    const activity = DIVERS_ACTIVITY_BY_ID[activityId];
+    if (activity) out.push({ slotIndex: idx, activityId, activity, passed });
+  }
+  return out;
 }
 
 export interface DiversDashboard {
@@ -148,13 +166,7 @@ export async function getDiversDashboard(db: Db, opts: DiversOpts = {}): Promise
     const ctx = await resolveCtx(tx, opts);
     const slots = await ensureDaySlots(tx, ctx);
     const suggestions: DiversSuggestionSlot[] = [];
-    for (const [idx, activityId] of [
-      [0, slots.slot0ActivityId],
-      [1, slots.slot1ActivityId],
-    ] as const) {
-      const activity = DIVERS_ACTIVITY_BY_ID[activityId];
-      if (activity) suggestions.push({ slotIndex: idx, activityId, activity });
-    }
+    suggestions.push(...suggestionsFromSlots(slots));
     const todayCompletions = await diversRepo.listCompletionsForDay(tx, ctx.today, true);
     const recentHistory = await diversRepo.listRecentCompletions(tx, 12, true);
     dash = {
@@ -181,38 +193,37 @@ function pickReplacement(exclude: Set<string>, localDate: string, slotIndex: num
 
 export type PassSuggestionResult = { ok: true; dashboard: DiversDashboard } | { ok: false; code: 'invalid_slot' };
 
-/** Passer une suggestion : rotation vers une autre activité du catalogue. */
+/** Passer : la suggestion du jour est masquée (persistant). Aucune nouvelle proposition, aucun remplacement consommé. */
 export async function passDiversSuggestion(
   db: Db,
   slotIndex: 0 | 1,
   opts: DiversOpts = {},
 ): Promise<PassSuggestionResult> {
+  if (slotIndex !== 0 && slotIndex !== 1) return { ok: false, code: 'invalid_slot' };
   let result: PassSuggestionResult = { ok: false, code: 'invalid_slot' };
   await db.withExclusiveTransactionAsync(async (tx) => {
     const ctx = await resolveCtx(tx, opts);
     const slots = await ensureDaySlots(tx, ctx);
-    const at = ctx.now.toISOString();
-    const exclude = buildExclude(slots, new Set(), []);
-    const current = slotIndex === 0 ? slots.slot0ActivityId : slots.slot1ActivityId;
-    exclude.add(current);
-    const next = pickReplacement(exclude, ctx.today, slotIndex);
-    const nextSlots = {
-      ...slots,
-      localDate: slots.localDate,
-      slot0ActivityId: slotIndex === 0 ? next : slots.slot0ActivityId,
-      slot1ActivityId: slotIndex === 1 ? next : slots.slot1ActivityId,
-      updatedAt: at,
-    };
-    await diversRepo.upsertDaySlots(tx, nextSlots);
-    await diversRepo.insertEvent(tx, {
-      id: createId('dev'),
-      kind: 'suggestion_passed',
-      activityId: current,
-      slotIndex,
-      localDate: ctx.today,
-      occurredAt: at,
-      payloadJson: JSON.stringify({ replacedBy: next }),
-    });
+    const alreadyPassed = slotIndex === 0 ? slots.slot0Passed : slots.slot1Passed;
+    if (!alreadyPassed) {
+      const at = ctx.now.toISOString();
+      const current = slotIndex === 0 ? slots.slot0ActivityId : slots.slot1ActivityId;
+      await diversRepo.upsertDaySlots(tx, {
+        ...slots,
+        slot0Passed: slotIndex === 0 ? true : slots.slot0Passed,
+        slot1Passed: slotIndex === 1 ? true : slots.slot1Passed,
+        updatedAt: at,
+      });
+      await diversRepo.insertEvent(tx, {
+        id: createId('dev'),
+        kind: 'suggestion_passed',
+        activityId: current,
+        slotIndex,
+        localDate: ctx.today,
+        occurredAt: at,
+        payloadJson: JSON.stringify({ hidden: true }),
+      });
+    }
     result = { ok: true, dashboard: await buildDashboardInTx(tx, ctx) };
   });
   return result;
@@ -220,14 +231,7 @@ export async function passDiversSuggestion(
 
 async function buildDashboardInTx(tx: SqlRunner, ctx: Ctx): Promise<DiversDashboard> {
   const slots = (await diversRepo.getDaySlots(tx, ctx.today))!;
-  const suggestions: DiversSuggestionSlot[] = [];
-  for (const [idx, activityId] of [
-    [0, slots.slot0ActivityId],
-    [1, slots.slot1ActivityId],
-  ] as const) {
-    const activity = DIVERS_ACTIVITY_BY_ID[activityId];
-    if (activity) suggestions.push({ slotIndex: idx, activityId, activity });
-  }
+  const suggestions = suggestionsFromSlots(slots);
   return {
     nowIso: ctx.now.toISOString(),
     timeZone: ctx.timeZone,
@@ -242,7 +246,7 @@ async function buildDashboardInTx(tx: SqlRunner, ctx: Ctx): Promise<DiversDashbo
 
 export type ReplaceSuggestionResult =
   | { ok: true; dashboard: DiversDashboard }
-  | { ok: false; code: 'limit_reached' | 'invalid_slot' };
+  | { ok: false; code: 'limit_reached' | 'invalid_slot' | 'already_done' };
 
 /** Remplacement explicite : max 1/jour ; l’activité remplacée ne revient pas tout de suite. */
 export async function replaceDiversSuggestion(
@@ -260,12 +264,18 @@ export async function replaceDiversSuggestion(
     }
     const at = ctx.now.toISOString();
     const current = slotIndex === 0 ? slots.slot0ActivityId : slots.slot1ActivityId;
+    if (await diversRepo.findActiveCompletionForActivity(tx, ctx.today, current)) {
+      result = { ok: false, code: 'already_done' };
+      return;
+    }
     const exclude = buildExclude(slots, new Set([current]), []);
     const next = pickReplacement(exclude, ctx.today, slotIndex + 5);
     await diversRepo.upsertDaySlots(tx, {
       localDate: slots.localDate,
       slot0ActivityId: slotIndex === 0 ? next : slots.slot0ActivityId,
       slot1ActivityId: slotIndex === 1 ? next : slots.slot1ActivityId,
+      slot0Passed: slotIndex === 0 ? false : slots.slot0Passed,
+      slot1Passed: slotIndex === 1 ? false : slots.slot1Passed,
       replacementsUsed: slots.replacementsUsed + 1,
       createdAt: slots.createdAt,
       updatedAt: at,
@@ -286,7 +296,7 @@ export async function replaceDiversSuggestion(
 
 export type ConfirmActivityResult =
   | { ok: true; completion: DiversCompletionRow; duplicate: boolean; message: string }
-  | { ok: false; code: 'invalid_activity' | 'not_suggested' };
+  | { ok: false; code: 'invalid_activity' | 'not_suggested' | 'passed' };
 
 export async function confirmDiversActivity(
   db: Db,
@@ -304,6 +314,11 @@ export async function confirmDiversActivity(
       result = { ok: false, code: 'not_suggested' };
       return;
     }
+    const slotPassed = activityId === slots.slot0ActivityId ? slots.slot0Passed : slots.slot1Passed;
+    if (slotPassed) {
+      result = { ok: false, code: 'passed' };
+      return;
+    }
     if (clientRequestId) {
       const existing = await diversRepo.getCompletionByRequestId(tx, clientRequestId);
       if (existing) {
@@ -315,6 +330,16 @@ export async function confirmDiversActivity(
         };
         return;
       }
+    }
+    const sameDay = await diversRepo.findActiveCompletionForActivity(tx, ctx.today, activityId);
+    if (sameDay) {
+      result = {
+        ok: true,
+        completion: sameDay,
+        duplicate: true,
+        message: 'Déjà noté aujourd\'hui pour cette activité.',
+      };
+      return;
     }
     const at = ctx.now.toISOString();
     const id = createId('dvc');
@@ -347,7 +372,7 @@ export async function confirmDiversActivity(
   return result;
 }
 
-export type CancelCompletionResult = { ok: true } | { ok: false; code: 'not_found' | 'already_cancelled' };
+export type CancelCompletionResult = { ok: true } | { ok: false; code: 'not_found' | 'already_cancelled' | 'rewarded' };
 
 export async function cancelDiversCompletion(db: Db, id: string, opts: DiversOpts = {}): Promise<CancelCompletionResult> {
   let result: CancelCompletionResult = { ok: false, code: 'not_found' };
@@ -357,6 +382,10 @@ export async function cancelDiversCompletion(db: Db, id: string, opts: DiversOpt
     if (!cur) return;
     if (cur.status === 'cancelled') {
       result = { ok: false, code: 'already_cancelled' };
+      return;
+    }
+    if (await isEvidencePaid(tx, `divers_activity:${id}`)) {
+      result = { ok: false, code: 'rewarded' };
       return;
     }
     const at = ctx.now.toISOString();

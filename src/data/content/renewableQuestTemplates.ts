@@ -9,7 +9,16 @@ export type RenewableProofKind =
   | 'inline_challenge'
   | 'combat_victory'
   | 'forge_upgrade'
-  | 'adaptive_vape_complete';
+  | 'adaptive_vape_complete'
+  | 'sport_session'
+  | 'proches_call'
+  | 'divers_activity';
+
+/** Preuves lues dans les journaux Sport / Proches / Divers (missions du jour). */
+export const DAILY_EVIDENCE_PROOFS: readonly RenewableProofKind[] = ['sport_session', 'proches_call', 'divers_activity'];
+export function isDailyEvidenceProof(p: RenewableProofKind): boolean {
+  return DAILY_EVIDENCE_PROOFS.includes(p);
+}
 
 export interface RenewableQuestTemplate {
   id: string;
@@ -28,6 +37,10 @@ export interface RenewableQuestTemplate {
   requiresGoalTemplateId?: string;
   requiresForgeLevelAtLeast?: number;
   sensitive?: boolean;
+  /** Missions du jour : activité Sport ciblée (objectif de la séance). */
+  activityId?: 'pushups' | 'walking';
+  /** Étiquette courte affichée sur la carte « Trois missions du jour ». */
+  dailyTag?: string;
 }
 
 export const RENEWABLE_GOLD_DAILY_CAP = 50;
@@ -195,8 +208,77 @@ export const RENEWABLE_TEMPLATES: RenewableQuestTemplate[] = [
   },
 ];
 
+/** Modèles réservés aux « Trois missions du jour » : jamais proposés par le carnet générique. */
+export const DAILY_ONLY_TEMPLATES: RenewableQuestTemplate[] = [
+  {
+    id: 'dq_sport_pushups',
+    category: 'habitudes',
+    title: 'Pompes : objectif atteint',
+    description: 'Fais une séance de pompes et atteins ton objectif Sport du moment.',
+    objective: 'Enregistrer une séance de pompes « objectif atteint » dans Habitudes → Sport, après avoir accepté.',
+    rewardGold: 10,
+    proof: 'sport_session',
+    activityId: 'pushups',
+    dailyTag: 'Sport',
+    difficulty: 'normal',
+    durationLabel: '~5 min',
+    nextStep: 'Habitudes → Sport → Pompes → enregistrer la séance avec « Atteint ».',
+  },
+  {
+    id: 'dq_sport_walking',
+    category: 'habitudes',
+    title: 'Marche : objectif atteint',
+    description: 'Fais une marche et atteins ton objectif Sport du moment.',
+    objective: 'Enregistrer une marche « objectif atteint » dans Habitudes → Sport, après avoir accepté.',
+    rewardGold: 10,
+    proof: 'sport_session',
+    activityId: 'walking',
+    dailyTag: 'Sport',
+    difficulty: 'normal',
+    durationLabel: '~20 min',
+    nextStep: 'Habitudes → Sport → Marche → enregistrer la séance avec « Atteint ».',
+  },
+  {
+    id: 'dq_proches_call',
+    category: 'habitudes',
+    title: 'Appeler un proche',
+    description: 'Un appel suffit, même court.',
+    objective: 'Déclarer un appel dans Habitudes → Proches, après avoir accepté.',
+    rewardGold: 8,
+    proof: 'proches_call',
+    dailyTag: 'Proches',
+    difficulty: 'facile',
+    durationLabel: '~10 min',
+    nextStep: 'Habitudes → Proches → enregistrer l\'appel (un contact seul ne compte pas).',
+  },
+  {
+    id: 'dq_divers_activity',
+    category: 'habitudes',
+    title: 'Une petite activité Divers',
+    description: 'Confirme l\'une des deux idées du jour, une fois réellement faite.',
+    objective: 'Confirmer une suggestion du jour dans Habitudes → Divers, après avoir accepté.',
+    rewardGold: 6,
+    proof: 'divers_activity',
+    dailyTag: 'Divers',
+    difficulty: 'facile',
+    durationLabel: '~10 min',
+    nextStep: 'Habitudes → Divers → « Je l\'ai fait » (« Passer » ne valide rien).',
+  },
+];
+
+/** Ordre de la réserve du jour (rotation déterministe par date). `rnw_breathe_calm` : modèle existant, chrono sur la carte. */
+export const DAILY_POOL_IDS: readonly string[] = [
+  'dq_sport_pushups',
+  'dq_sport_walking',
+  'dq_proches_call',
+  'dq_divers_activity',
+  'rnw_breathe_calm',
+];
+
+export const DAILY_QUEST_COUNT = 3;
+
 export const RENEWABLE_BY_ID: Record<string, RenewableQuestTemplate> = Object.fromEntries(
-  RENEWABLE_TEMPLATES.map((t) => [t.id, t]),
+  [...RENEWABLE_TEMPLATES, ...DAILY_ONLY_TEMPLATES].map((t) => [t.id, t]),
 );
 
 export const CATEGORY_LABELS: Record<RenewableQuestCategory, string> = {

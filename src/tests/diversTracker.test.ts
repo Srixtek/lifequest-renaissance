@@ -84,12 +84,16 @@ suite('V1-04A — petites activités Divers', () => {
     if (!r2.ok) expect(r2.code).toBe('limit_reached');
   });
 
-  test('8. passer une suggestion', async () => {
+  test('8. passer masque la suggestion sans en créer une autre ni consommer le remplacement', async () => {
     const before = await getDiversDashboard(t.db, opts);
     const id0 = before.suggestions[0].activityId;
     const passed = await passDiversSuggestion(t.db, 0, opts);
     expect(passed.ok).toBe(true);
-    if (passed.ok) expect(passed.dashboard.suggestions[0].activityId).not.toBe(id0);
+    if (passed.ok) {
+      expect(passed.dashboard.suggestions[0].activityId).toBe(id0);
+      expect(passed.dashboard.suggestions[0].passed).toBe(true);
+      expect(passed.dashboard.replacementsRemaining).toBe(1);
+    }
   });
 
   test('9. confirm idempotent client_request_id', async () => {
@@ -130,7 +134,7 @@ suite('V1-04A — petites activités Divers', () => {
   test('12. migration 015 → 016 additive', async () => {
     await t.db.execAsync(`
       DROP TABLE IF EXISTS divers_events; DROP TABLE IF EXISTS divers_completions; DROP TABLE IF EXISTS divers_day_slots;
-      DELETE FROM schema_migrations WHERE version = 16;
+      DELETE FROM schema_migrations WHERE version IN (16, 17);
     `);
     const prochesBefore = await getProchesDashboard(t.db, { timeZone: TZ, dayStartHour: 4, now: at(DAY + 'T12:00:00.000Z') });
     await migrate(t.db);
