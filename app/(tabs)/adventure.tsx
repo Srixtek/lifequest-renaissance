@@ -135,7 +135,7 @@ export default function AdventureScreen() {
         kingdom?.combat.combatMode === 'campaign' &&
         (kingdom.combat.active || !!kingdom.combat.outcome);
       if (campaignInProgress) {
-        setCombatOpen(false);
+        setCombatOpen(true);
         setKingdomMsg(
           'Un combat de campagne est en cours — ouvre la Forêt d\'Eloria pour reprendre ou voir le résultat.',
         );
@@ -435,11 +435,12 @@ export default function AdventureScreen() {
                     Combat de campagne en cours — ouvre la Forêt d&apos;Eloria pour combattre ou voir le résultat.
                   </Body>
                   <Button
-                    label="Aller à la campagne"
+                    label="Aller à la Forêt"
                     compact
                     onPress={() => {
                       setCampaignOpen(true);
                       setCombatOpen(true);
+                      setForgeOpen(false);
                     }}
                   />
                 </FantasyPanel>
